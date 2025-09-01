@@ -1,0 +1,36 @@
+listen:
+  http_proxy: "0.0.0.0:8080"
+  socks5_proxy: "0.0.0.0:1080"
+  api: "0.0.0.0:8081"
+
+timeouts:
+  dial_ms: 8000
+  read_ms: 60000
+  write_ms: 60000
+
+tor:
+  enabled: true
+  socks_address: "127.0.0.1:9050"
+
+refresh:
+  enable_general_sources: true
+  interval_sec: 900
+  healthcheck_concurrency: 50
+  sources:
+    - name: "spys.one-gb"
+      url: "https://spys.one/free-proxy-list/GB/"
+      type: "html"
+    - name: "raw-list"
+      url: "https://example.com/proxies.txt"
+      type: "raw"
+
+database:
+  path: "/var/lib/proxyr/router.db"
+
+logging:
+  level: "info"
+  format: "json"
+
+metrics:
+  enabled: true
+  path: "/metrics"
