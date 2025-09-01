@@ -17,6 +17,8 @@ type Config struct {
 	Database DatabaseConfig `mapstructure:"database"`
 	Logging  LoggingConfig  `mapstructure:"logging"`
 	Metrics  MetricsConfig  `mapstructure:"metrics"`
+	Admin    AdminConfig    `mapstructure:"admin"`
+	Security SecurityConfig `mapstructure:"security"`
 }
 
 // ListenConfig holds listening addresses
@@ -71,6 +73,36 @@ type MetricsConfig struct {
 	Path    string `mapstructure:"path"`
 }
 
+// AdminConfig holds admin UI settings
+type AdminConfig struct {
+	Enabled      bool     `mapstructure:"enabled"`
+	Bind         string   `mapstructure:"bind"`
+	Port         int      `mapstructure:"port"`
+	BasePath     string   `mapstructure:"base_path"`
+	SessionSecret string  `mapstructure:"session_secret"`
+	AllowCIDRs   []string `mapstructure:"allow_cidrs"`
+	TLS          TLSConfig `mapstructure:"tls"`
+}
+
+// TLSConfig holds TLS settings
+type TLSConfig struct {
+	Enabled  bool   `mapstructure:"enabled"`
+	CertFile string `mapstructure:"cert_file"`
+	KeyFile  string `mapstructure:"key_file"`
+}
+
+// SecurityConfig holds security settings
+type SecurityConfig struct {
+	PasswordHash string         `mapstructure:"password_hash"`
+	Login        LoginConfig    `mapstructure:"login"`
+}
+
+// LoginConfig holds login security settings
+type LoginConfig struct {
+	MaxAttempts    int `mapstructure:"max_attempts"`
+	WindowSeconds  int `mapstructure:"window_seconds"`
+}
+
 // Load loads configuration from file and environment variables
 func Load(configPath string) (*Config, error) {
 	viper.SetConfigFile(configPath)
@@ -119,6 +151,22 @@ func setDefaults() {
 	viper.SetDefault("logging.format", "json")
 	viper.SetDefault("metrics.enabled", true)
 	viper.SetDefault("metrics.path", "/metrics")
+	
+	// Admin UI defaults
+	viper.SetDefault("admin.enabled", true)
+	viper.SetDefault("admin.bind", "127.0.0.1")
+	viper.SetDefault("admin.port", 5000)
+	viper.SetDefault("admin.base_path", "/admin")
+	viper.SetDefault("admin.session_secret", "")
+	viper.SetDefault("admin.allow_cidrs", []string{"127.0.0.1/32"})
+	viper.SetDefault("admin.tls.enabled", false)
+	viper.SetDefault("admin.tls.cert_file", "")
+	viper.SetDefault("admin.tls.key_file", "")
+	
+	// Security defaults
+	viper.SetDefault("security.password_hash", "argon2id")
+	viper.SetDefault("security.login.max_attempts", 10)
+	viper.SetDefault("security.login.window_seconds", 900)
 }
 
 // validateConfig validates the configuration
@@ -215,6 +263,38 @@ func validateConfig(config *Config) error {
 		if !validFormats[config.Logging.Format] {
 			errors = append(errors, fmt.Sprintf("invalid logging format: %s (must be json or text)", config.Logging.Format))
 		}
+	}
+
+	// Check admin configuration
+	if config.Admin.Enabled {
+		if config.Admin.Port < 1 || config.Admin.Port > 65535 {
+			errors = append(errors, fmt.Sprintf("admin port %d is invalid (must be 1-65535)", config.Admin.Port))
+		}
+		if config.Admin.Bind == "" {
+			errors = append(errors, "admin bind address is required when admin is enabled")
+		}
+		if config.Admin.TLS.Enabled {
+			if config.Admin.TLS.CertFile == "" {
+				errors = append(errors, "admin TLS cert file is required when TLS is enabled")
+			}
+			if config.Admin.TLS.KeyFile == "" {
+				errors = append(errors, "admin TLS key file is required when TLS is enabled")
+			}
+		}
+	}
+
+	// Check security configuration
+	if config.Security.PasswordHash != "" {
+		validHashes := map[string]bool{"argon2id": true, "bcrypt": true}
+		if !validHashes[config.Security.PasswordHash] {
+			errors = append(errors, fmt.Sprintf("invalid password hash algorithm: %s (must be argon2id or bcrypt)", config.Security.PasswordHash))
+		}
+	}
+	if config.Security.Login.MaxAttempts < 1 {
+		errors = append(errors, "login max attempts must be at least 1")
+	}
+	if config.Security.Login.WindowSeconds < 1 {
+		errors = append(errors, "login window seconds must be at least 1")
 	}
 
 	if len(errors) > 0 {

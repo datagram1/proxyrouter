@@ -1,36 +1,66 @@
+# ProxyRouter Configuration
+
+# Listening addresses
 listen:
   http_proxy: "0.0.0.0:8080"
   socks5_proxy: "0.0.0.0:1080"
   api: "0.0.0.0:8081"
 
+# Timeout settings (in milliseconds)
 timeouts:
   dial_ms: 8000
   read_ms: 60000
   write_ms: 60000
 
+# Tor configuration
 tor:
   enabled: true
   socks_address: "127.0.0.1:9050"
 
+# Refresh configuration
 refresh:
   enable_general_sources: true
   interval_sec: 900
   healthcheck_concurrency: 50
   sources:
-    - name: "spys.one-gb"
-      url: "https://spys.one/free-proxy-list/GB/"
+    - name: "spys.one"
+      url: "https://spys.one/free-proxy-list/"
       type: "html"
-    - name: "raw-list"
-      url: "https://example.com/proxies.txt"
+    - name: "raw_list"
+      url: "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt"
       type: "raw"
 
+# Database configuration
 database:
   path: "/var/lib/proxyr/router.db"
 
+# Logging configuration
 logging:
   level: "info"
   format: "json"
 
+# Metrics configuration
 metrics:
   enabled: true
   path: "/metrics"
+
+# Admin UI configuration
+admin:
+  enabled: true
+  bind: "0.0.0.0"
+  port: 8082
+  base_path: "/admin"
+  session_secret: ""  # Will be auto-generated if empty
+  allow_cidrs:
+    - "0.0.0.0/0"
+  tls:
+    enabled: false
+    cert_file: ""
+    key_file: ""
+
+# Security configuration
+security:
+  password_hash: "argon2id"
+  login:
+    max_attempts: 10
+    window_seconds: 900

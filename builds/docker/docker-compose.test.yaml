@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  tor:
+    image: dperson/torproxy:latest
+    restart: unless-stopped
+    ports:
+      - "9050:9050"
+    environment:
+      - TZ=UTC
+
+  proxyrouter:
+    build: .
+    depends_on: [tor]
+    restart: unless-stopped
+    ports:
+      - "8080:8080"   # HTTP proxy
+      - "1080:1080"   # SOCKS5 proxy
+      - "8081:8081"   # API
+      - "6000:6000"   # Admin UI
+    volumes:
+      - ./data:/var/lib/proxyr
+      - ./docker-config.yaml:/etc/proxyrouter/config.yaml:ro
+    environment:
+      - TOR_SOCKS=tor:9050
+    command: ["/usr/local/bin/proxyrouter", "-config", "/etc/proxyrouter/config.yaml"]

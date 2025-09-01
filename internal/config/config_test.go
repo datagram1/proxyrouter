@@ -236,6 +236,13 @@ func TestValidateConfig(t *testing.T) {
 				Database: DatabaseConfig{
 					Path: "/tmp/test.db",
 				},
+				Security: SecurityConfig{
+					PasswordHash: "argon2id",
+					Login: LoginConfig{
+						MaxAttempts:   10,
+						WindowSeconds: 900,
+					},
+				},
 			},
 			wantErr: false,
 		},
@@ -257,6 +264,13 @@ func TestValidateConfig(t *testing.T) {
 				},
 				Database: DatabaseConfig{
 					Path: "/tmp/test.db",
+				},
+				Security: SecurityConfig{
+					PasswordHash: "argon2id",
+					Login: LoginConfig{
+						MaxAttempts:   10,
+						WindowSeconds: 900,
+					},
 				},
 			},
 			wantErr: true,
@@ -300,6 +314,13 @@ func TestValidateConfig(t *testing.T) {
 				},
 				Database: DatabaseConfig{
 					Path: "/tmp/test.db",
+				},
+				Security: SecurityConfig{
+					PasswordHash: "argon2id",
+					Login: LoginConfig{
+						MaxAttempts:   10,
+						WindowSeconds: 900,
+					},
 				},
 			},
 			wantErr: true,

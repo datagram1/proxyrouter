@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"proxyrouter/internal/acl"
+	"proxyrouter/internal/admin"
 	"proxyrouter/internal/api"
 	"proxyrouter/internal/config"
 	"proxyrouter/internal/db"
@@ -113,7 +114,7 @@ func main() {
 	defer refreshJobManager.Stop()
 
 	// Start servers
-	errChan := make(chan error, 3)
+	errChan := make(chan error, 4)
 
 	// Start HTTP proxy
 	go func() {
@@ -135,6 +136,16 @@ func main() {
 			errChan <- fmt.Errorf("API server error: %w", err)
 		}
 	}()
+
+	// Start admin server if enabled
+	if cfg.Admin.Enabled {
+		adminServer := admin.NewServer(cfg, database)
+		go func() {
+			if err := adminServer.Start(ctx); err != nil {
+				errChan <- fmt.Errorf("Admin server error: %w", err)
+			}
+		}()
+	}
 
 	// Wait for context cancellation or error
 	select {

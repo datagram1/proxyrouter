@@ -1,0 +1,46 @@
+listen:
+  http_proxy: "0.0.0.0:8080"
+  socks5_proxy: "0.0.0.0:1080"
+  api: "0.0.0.0:8081"
+
+timeouts:
+  dial_ms: 5000
+  read_ms: 30000
+  write_ms: 30000
+
+tor:
+  enabled: true
+  socks_address: "tor:9050"
+
+refresh:
+  enable_general_sources: false
+  interval_sec: 900
+  healthcheck_concurrency: 10
+  sources: []
+
+database:
+  path: "/var/lib/proxyr/proxyrouter.db"
+
+logging:
+  level: "info"
+  format: "text"
+
+metrics:
+  enabled: true
+  path: "/metrics"
+
+admin:
+  enabled: true
+  bind: "0.0.0.0"
+  port: 6000
+  basePath: "/admin"
+  sessionSecret: ""
+  allowCIDRs: ["0.0.0.0/0"]
+  tls:
+    enabled: false
+
+security:
+  passwordHash: "argon2id"
+  login:
+    maxAttempts: 10
+    windowSeconds: 900

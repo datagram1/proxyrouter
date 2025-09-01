@@ -2,10 +2,12 @@ version: '3.8'
 
 services:
   tor:
-    image: dperson/torproxy
+    image: dperson/torproxy:latest
     restart: unless-stopped
     ports:
       - "9050:9050"
+    environment:
+      - TZ=UTC
 
   proxyrouter:
     build: .
@@ -15,6 +17,7 @@ services:
       - "8080:8080"   # HTTP proxy
       - "1080:1080"   # SOCKS5 proxy
       - "8081:8081"   # API
+      - "8082:8082"   # Admin UI
     volumes:
       - ./data:/var/lib/proxyr
     environment:

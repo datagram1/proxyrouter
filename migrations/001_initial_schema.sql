@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS routes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   client_cidr TEXT,                 -- e.g. "192.168.10.0/24" (nullable = any client)
   host_glob TEXT,                   -- e.g. "*.github.com" (nullable = any host)
-  group TEXT NOT NULL,              -- "LOCAL"|"GENERAL"|"TOR"|"UPSTREAM"
+  "group" TEXT NOT NULL,              -- "LOCAL"|"GENERAL"|"TOR"|"UPSTREAM"
   proxy_id INTEGER,                 -- used when group="UPSTREAM"
   precedence INTEGER NOT NULL DEFAULT 100,
   enabled INTEGER NOT NULL DEFAULT 1,
@@ -32,8 +32,9 @@ CREATE TABLE IF NOT EXISTS acl_subnets (
 );
 
 CREATE TABLE IF NOT EXISTS settings (
-  k TEXT PRIMARY KEY,
-  v TEXT NOT NULL
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Create indexes for better performance
@@ -42,4 +43,4 @@ CREATE INDEX IF NOT EXISTS idx_proxies_latency ON proxies(latency_ms);
 CREATE INDEX IF NOT EXISTS idx_proxies_last_checked ON proxies(last_checked_at);
 CREATE INDEX IF NOT EXISTS idx_routes_precedence ON routes(precedence);
 CREATE INDEX IF NOT EXISTS idx_routes_enabled ON routes(enabled);
-CREATE INDEX IF NOT EXISTS idx_routes_group ON routes(group);
+CREATE INDEX IF NOT EXISTS idx_routes_group ON routes("group");

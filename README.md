@@ -7,6 +7,7 @@ A high-performance LAN proxy router for Ubuntu Linux, written in Go. ProxyRouter
 - **HTTP Proxy Server** (`0.0.0.0:8080`) - Supports HTTP forward + HTTPS CONNECT tunneling
 - **SOCKS5 Proxy Server** (`0.0.0.0:1080`) - Full SOCKS5 protocol support
 - **REST API** (`0.0.0.0:8081`) - JSON API for configuration and monitoring
+- **Admin Web UI** (`127.0.0.1:6000`) - Web interface for management and monitoring
 - **Routing Engine** - Routes requests by policy into four groups:
   - **LOCAL** → direct connection
   - **GENERAL** → randomly selected, healthy proxy from a downloaded pool
@@ -14,6 +15,7 @@ A high-performance LAN proxy router for Ubuntu Linux, written in Go. ProxyRouter
   - **UPSTREAM** → a specific proxy chosen from the database
 - **Access Control** - Only clients from `192.168.10.0/24` and `192.168.11.0/24` may connect (configurable)
 - **SQLite Database** - Fast, lightweight storage for proxies, routes, ACLs, and settings
+- **Admin Web UI** - Secure web interface with dashboard, settings management, proxy upload, and user management
 - **Docker Support** - Run as a container with Tor sidecar
 - **Systemd Integration** - Run as a native Linux service
 
@@ -27,6 +29,7 @@ A high-performance LAN proxy router for Ubuntu Linux, written in Go. ProxyRouter
 
 ### Build and Run
 
+#### Quick Build (Current Platform)
 ```bash
 # Clone the repository
 git clone https://github.com/yourusername/proxyrouter.git
@@ -40,16 +43,51 @@ make build
 ./bin/proxyrouter -config configs/config.yaml
 ```
 
+#### Multi-Platform Builds
+```bash
+# Build all platforms
+make builds
+
+# Build specific platforms
+make build-macos    # macOS ARM64 + AMD64
+make build-linux    # Linux AMD64 + ARM64
+make build-windows  # Windows AMD64
+make build-docker   # Docker files
+
+# Or use the build script directly
+./builds/build-all.sh all
+./builds/build-all.sh macos-arm64
+./builds/build-all.sh linux-amd64
+```
+
+See [Build System Documentation](builds/README.md) for detailed build instructions.
+
 ### Docker
 
+#### Quick Testing (ARM Mac)
+```bash
+# One-command testing with automated setup
+chmod +x test-docker.sh
+./test-docker.sh start
+
+# Stop and cleanup
+./test-docker.sh stop
+```
+
+#### Manual Docker Setup
 ```bash
 # Build and run with Tor sidecar
 docker-compose up --build
 
 # Or build image separately
 make docker
-docker run -p 8080:8080 -p 1080:1080 -p 8081:8081 proxyrouter
+docker run -p 8080:8080 -p 1080:1080 -p 8081:8081 -p 6000:6000 proxyrouter
 ```
+
+#### Docker Testing Guide
+For detailed Docker testing instructions, see:
+- [Docker Testing Guide](DOCKER_TESTING.md) - Comprehensive testing instructions
+- [Quick Start Guide](DOCKER_QUICK_START.md) - Fast setup and testing
 
 ### Systemd Service
 
@@ -105,7 +143,54 @@ logging:
 metrics:
   enabled: true
   path: "/metrics"
-```
+
+admin:
+  enabled: true
+  bind: "127.0.0.1"
+  port: 6000
+  basePath: "/admin"
+  sessionSecret: ""
+  allowCIDRs: ["127.0.0.1/32"]
+  tls:
+    enabled: false
+
+security:
+  passwordHash: "argon2id"
+  login:
+    maxAttempts: 10
+    windowSeconds: 900
+
+## Admin Web UI
+
+ProxyRouter includes a secure web-based administration interface for easy management and monitoring.
+
+### Access
+
+- **URL**: `http://127.0.0.1:6000/admin`
+- **Default Credentials**: `admin` / `admin`
+- **Security**: You'll be forced to change the password on first login
+
+### Features
+
+- **Dashboard**: System status, health metrics, and live statistics
+- **Settings Management**: Runtime configuration changes
+- **Proxy Upload**: Bulk import of proxy lists via .txt or .csv files
+- **User Management**: Create additional admin users and change passwords
+- **Health Monitoring**: Component status and system metrics
+
+### Security Features
+
+- Session-based authentication with secure cookies
+- CSRF protection for all forms
+- IP-based rate limiting for login attempts
+- CIDR-based access control
+- Security headers (X-Frame-Options, Content-Security-Policy, etc.)
+- Password hashing with Argon2id
+- Audit logging for all admin actions
+
+### Configuration
+
+The Admin UI can be configured in the `admin` and `security` sections of the configuration file. By default, it's bound to `127.0.0.1:6000` for security.
 
 ## API Reference
 

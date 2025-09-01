@@ -1,0 +1,139 @@
+#!/bin/bash
+
+# Build script for Linux ARM64
+set -e
+
+echo "🔨 Building ProxyRouter for Linux ARM64..."
+
+# Set build variables
+export GOOS=linux
+export GOARCH=arm64
+export CGO_ENABLED=0
+
+# Build directory
+BUILD_DIR="$(dirname "$0")/linux-arm64"
+mkdir -p "$BUILD_DIR"
+
+# Build binary
+echo "Building binary..."
+go build -ldflags="-s -w" -o "$BUILD_DIR/proxyrouter" ./cmd/proxyrouter
+
+# Copy configuration files
+echo "Copying configuration files..."
+cp configs/config.yaml "$BUILD_DIR/"
+cp -r migrations "$BUILD_DIR/"
+cp systemd/proxyrouter.service "$BUILD_DIR/"
+
+# Create README for this build
+cat > "$BUILD_DIR/README.md" << 'EOF'
+# ProxyRouter for Linux ARM64
+
+This build is specifically compiled for Linux ARM64 systems.
+
+## Installation
+
+1. Make the binary executable:
+   ```bash
+   chmod +x proxyrouter
+   ```
+
+2. Run the application:
+   ```bash
+   ./proxyrouter -config config.yaml
+   ```
+
+## Features
+
+- Native Linux ARM64 performance
+- No external dependencies (static binary)
+- Includes all configuration files and migrations
+- Systemd service file included
+
+## System Requirements
+
+- Linux kernel 4.0 or later
+- ARM64 processor (AArch64)
+- glibc 2.17 or later (for most distributions)
+
+## Compatible Systems
+
+- Raspberry Pi 4 (64-bit OS)
+- ARM64 servers (AWS Graviton, etc.)
+- ARM64 development boards
+- Apple Silicon Macs (Linux)
+
+## Default Configuration
+
+- HTTP Proxy: 0.0.0.0:8080
+- SOCKS5 Proxy: 0.0.0.0:1080
+- API: 0.0.0.0:8081
+- Admin UI: 127.0.0.1:5000
+
+## Quick Start
+
+```bash
+# Start with default config
+./proxyrouter
+
+# Start with custom config
+./proxyrouter -config config.yaml
+
+# Show version
+./proxyrouter -version
+```
+
+## Systemd Service Installation
+
+1. Copy the service file:
+   ```bash
+   sudo cp proxyrouter.service /etc/systemd/system/
+   ```
+
+2. Create data directory:
+   ```bash
+   sudo mkdir -p /var/lib/proxyr
+   sudo chown $USER:$USER /var/lib/proxyr
+   ```
+
+3. Enable and start the service:
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable proxyrouter
+   sudo systemctl start proxyrouter
+   ```
+
+4. Check status:
+   ```bash
+   sudo systemctl status proxyrouter
+   ```
+
+## Docker
+
+This build can also be used in Docker containers:
+
+```bash
+# Build Docker image for ARM64
+docker build --platform linux/arm64 -t proxyrouter:arm64 .
+
+# Run container
+docker run -p 8080:8080 -p 1080:1080 -p 8081:8081 -p 5000:5000 proxyrouter:arm64
+```
+
+## Raspberry Pi
+
+For Raspberry Pi 4 with 64-bit OS:
+
+```bash
+# Copy to Pi
+scp proxyrouter pi@raspberrypi.local:~/
+
+# SSH to Pi and run
+ssh pi@raspberrypi.local
+chmod +x proxyrouter
+./proxyrouter -config config.yaml
+```
+EOF
+
+echo "✅ Build completed for Linux ARM64"
+echo "📁 Build location: $BUILD_DIR"
+echo "📦 Binary size: $(du -h "$BUILD_DIR/proxyrouter" | cut -f1)"
