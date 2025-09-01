@@ -16,6 +16,7 @@ import (
 	"proxyrouter/internal/db"
 	"proxyrouter/internal/proxyhttp"
 	"proxyrouter/internal/proxysocks"
+	"proxyrouter/internal/refresh"
 	"proxyrouter/internal/router"
 )
 
@@ -51,6 +52,7 @@ func main() {
 		cfg.Tor.SocksAddress,
 		cfg.GetDialTimeout(),
 	)
+	refresher := refresh.New(database.GetDB(), &cfg.Refresh)
 
 	// Initialize servers
 	httpProxy := proxyhttp.New(
@@ -70,8 +72,11 @@ func main() {
 
 	apiServer := api.New(
 		cfg.Listen.API,
+		database,
 		aclManager,
 		routerEngine,
+		refresher,
+		cfg,
 	)
 
 	// Create context for graceful shutdown

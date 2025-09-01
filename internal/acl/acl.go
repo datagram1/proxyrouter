@@ -103,6 +103,26 @@ func (a *ACL) RemoveSubnet(ctx context.Context, id int) error {
 	return nil
 }
 
+// RemoveSubnetByCIDR removes an allowed subnet by CIDR
+func (a *ACL) RemoveSubnetByCIDR(ctx context.Context, cidr string) error {
+	query := "DELETE FROM acl_subnets WHERE cidr = ?"
+	result, err := a.db.ExecContext(ctx, query, cidr)
+	if err != nil {
+		return fmt.Errorf("failed to remove subnet: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("subnet with CIDR %s not found", cidr)
+	}
+
+	return nil
+}
+
 // GetSubnets returns all subnets with their IDs
 func (a *ACL) GetSubnets(ctx context.Context) ([]Subnet, error) {
 	query := "SELECT id, cidr FROM acl_subnets ORDER BY cidr"

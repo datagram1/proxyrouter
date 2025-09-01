@@ -158,8 +158,13 @@ func (r *Router) hostMatchesGlob(host, glob string) bool {
 	return host == glob
 }
 
-// GetRoutes returns all routes
-func (r *Router) GetRoutes(ctx context.Context) ([]Route, error) {
+// GetRoutes returns all routes (without context for backward compatibility)
+func (r *Router) GetRoutes() ([]Route, error) {
+	return r.GetRoutesWithContext(context.Background())
+}
+
+// GetRoutesWithContext returns all routes with context
+func (r *Router) GetRoutesWithContext(ctx context.Context) ([]Route, error) {
 	query := `
 		SELECT id, client_cidr, host_glob, group, proxy_id, precedence, enabled, created_at
 		FROM routes
@@ -214,8 +219,8 @@ func (r *Router) GetRoutes(ctx context.Context) ([]Route, error) {
 	return routes, nil
 }
 
-// CreateRoute creates a new route
-func (r *Router) CreateRoute(ctx context.Context, route *Route) error {
+// CreateRouteWithContext creates a new route with context
+func (r *Router) CreateRouteWithContext(ctx context.Context, route *Route) error {
 	query := `
 		INSERT INTO routes (client_cidr, host_glob, group, proxy_id, precedence, enabled)
 		VALUES (?, ?, ?, ?, ?, ?)
@@ -264,8 +269,8 @@ func (r *Router) UpdateRoute(ctx context.Context, id int, updates map[string]int
 	return nil
 }
 
-// DeleteRoute deletes a route
-func (r *Router) DeleteRoute(ctx context.Context, id int) error {
+// DeleteRouteWithContext deletes a route with context
+func (r *Router) DeleteRouteWithContext(ctx context.Context, id int) error {
 	query := "DELETE FROM routes WHERE id = ?"
 	
 	result, err := r.db.ExecContext(ctx, query, id)
@@ -283,4 +288,16 @@ func (r *Router) DeleteRoute(ctx context.Context, id int) error {
 	}
 
 	return nil
+}
+
+// CreateRoute creates a new route (without context for backward compatibility)
+func (r *Router) CreateRoute(route *Route) error {
+	return r.CreateRouteWithContext(context.Background(), route)
+}
+
+
+
+// DeleteRoute deletes a route (without context for backward compatibility)
+func (r *Router) DeleteRoute(id int) error {
+	return r.DeleteRouteWithContext(context.Background(), id)
 }

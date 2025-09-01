@@ -1,0 +1,105 @@
+name: Bug Report
+description: Create a report to help us improve ProxyRouter
+title: "[BUG] "
+labels: ["bug"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report!
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Also tell us, what did you expect to happen?
+      placeholder: Tell us what you see!
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce the problem
+      description: |
+        1. Go to '...'
+        2. Click on '...'
+        3. Scroll down to '...'
+        4. See error
+      placeholder: |
+        1. Set proxy to http://localhost:8080
+        2. Try to access https://example.com
+        3. See connection timeout
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: ProxyRouter Version
+      description: What version of ProxyRouter are you running?
+      placeholder: e.g. v1.0.0 or commit hash
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      description: What operating system are you using?
+      options:
+        - Ubuntu 22.04
+        - Ubuntu 20.04
+        - macOS
+        - Windows
+        - Other (please specify)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment Method
+      description: How are you running ProxyRouter?
+      options:
+        - Docker
+        - Systemd Service
+        - Manual (./bin/proxyrouter)
+        - Other (please specify)
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Please include any relevant logs. You can enable debug logging by setting `logging.level: "debug"` in your config.
+      placeholder: |
+        ```
+        2024-01-01T00:00:00Z [ERROR] Failed to connect to upstream proxy
+        2024-01-01T00:00:01Z [ERROR] Connection timeout
+        ```
+      render: shell
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: Please share your configuration (remove any sensitive information like API keys)
+      placeholder: |
+        ```yaml
+        listen:
+          http_proxy: "0.0.0.0:8080"
+          socks5_proxy: "0.0.0.0:1080"
+          api: "0.0.0.0:8081"
+        ```
+      render: yaml
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Add any other context about the problem here.
+      placeholder: Any additional information that might be helpful
