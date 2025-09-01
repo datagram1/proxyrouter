@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -122,28 +123,123 @@ func setDefaults() {
 
 // validateConfig validates the configuration
 func validateConfig(config *Config) error {
+	var errors []string
+
+	// Check required listen addresses
 	if config.Listen.HTTPProxy == "" {
-		return fmt.Errorf("http_proxy listen address is required")
+		errors = append(errors, "http_proxy listen address is required")
 	}
 	if config.Listen.Socks5Proxy == "" {
-		return fmt.Errorf("socks5_proxy listen address is required")
+		errors = append(errors, "socks5_proxy listen address is required")
 	}
 	if config.Listen.API == "" {
-		return fmt.Errorf("api listen address is required")
+		errors = append(errors, "api listen address is required")
 	}
+
+	// Check for port clashes by parsing listen addresses
+	ports := make(map[string]string)
+	if config.Listen.HTTPProxy != "" {
+		if port := extractPort(config.Listen.HTTPProxy); port != "" {
+			ports[port] = "HTTP Proxy"
+		}
+	}
+	if config.Listen.Socks5Proxy != "" {
+		if port := extractPort(config.Listen.Socks5Proxy); port != "" {
+			ports[port] = "SOCKS5 Proxy"
+		}
+	}
+	if config.Listen.API != "" {
+		if port := extractPort(config.Listen.API); port != "" {
+			ports[port] = "API"
+		}
+	}
+
+	// Check for duplicate ports
+	portCount := make(map[string]int)
+	for port := range ports {
+		portCount[port]++
+	}
+	for port, count := range portCount {
+		if count > 1 {
+			errors = append(errors, fmt.Sprintf("Port %s is used by multiple services", port))
+		}
+	}
+
+	// Check database configuration
 	if config.Database.Path == "" {
-		return fmt.Errorf("database path is required")
+		errors = append(errors, "database path is required")
 	}
+
+	// Check timeout configurations
 	if config.Timeouts.DialMs <= 0 {
-		return fmt.Errorf("dial timeout must be positive")
+		errors = append(errors, "dial timeout must be positive")
 	}
 	if config.Timeouts.ReadMs <= 0 {
-		return fmt.Errorf("read timeout must be positive")
+		errors = append(errors, "read timeout must be positive")
 	}
 	if config.Timeouts.WriteMs <= 0 {
-		return fmt.Errorf("write timeout must be positive")
+		errors = append(errors, "write timeout must be positive")
 	}
+
+	// Check Tor configuration
+	if config.Tor.Enabled {
+		if config.Tor.SocksAddress == "" {
+			errors = append(errors, "Tor socks_address is required when Tor is enabled")
+		} else {
+			if port := extractPort(config.Tor.SocksAddress); port != "" {
+				if portInt := parsePort(port); portInt < 1 || portInt > 65535 {
+					errors = append(errors, fmt.Sprintf("Tor port %s is invalid (must be 1-65535)", port))
+				}
+			}
+		}
+	}
+
+	// Check refresh configuration
+	if config.Refresh.IntervalSec < 1 {
+		errors = append(errors, "refresh interval must be at least 1 second")
+	}
+	if config.Refresh.HealthcheckConcurrency < 1 {
+		errors = append(errors, "healthcheck concurrency must be at least 1")
+	}
+
+	// Check logging configuration
+	if config.Logging.Level != "" {
+		validLevels := map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
+		if !validLevels[config.Logging.Level] {
+			errors = append(errors, fmt.Sprintf("invalid logging level: %s (must be debug, info, warn, or error)", config.Logging.Level))
+		}
+	}
+
+	if config.Logging.Format != "" {
+		validFormats := map[string]bool{"json": true, "text": true}
+		if !validFormats[config.Logging.Format] {
+			errors = append(errors, fmt.Sprintf("invalid logging format: %s (must be json or text)", config.Logging.Format))
+		}
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("configuration validation failed:\n%s", strings.Join(errors, "\n"))
+	}
+
 	return nil
+}
+
+// extractPort extracts port from address string (e.g., "127.0.0.1:8080" -> "8080")
+func extractPort(addr string) string {
+	if idx := strings.LastIndex(addr, ":"); idx != -1 && idx < len(addr)-1 {
+		return addr[idx+1:]
+	}
+	return ""
+}
+
+// parsePort converts port string to integer, returns 0 if invalid
+func parsePort(portStr string) int {
+	var port int
+	_, err := fmt.Sscanf(portStr, "%d", &port)
+	if err != nil {
+		return 0
+	}
+	return port
 }
 
 // GetDialTimeout returns the dial timeout as time.Duration
@@ -163,5 +259,11 @@ func (c *Config) GetWriteTimeout() time.Duration {
 
 // GetRefreshInterval returns the refresh interval as time.Duration
 func (c *Config) GetRefreshInterval() time.Duration {
+	return time.Duration(c.Refresh.IntervalSec) * time.Second
+}
+
+// GetHealthCheckInterval returns the health check interval as time.Duration
+func (c *Config) GetHealthCheckInterval() time.Duration {
+	// For now, use the same interval as refresh, but this could be configurable
 	return time.Duration(c.Refresh.IntervalSec) * time.Second
 }

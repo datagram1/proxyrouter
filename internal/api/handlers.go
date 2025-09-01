@@ -14,6 +14,7 @@ import (
 	"proxyrouter/internal/db"
 	"proxyrouter/internal/refresh"
 	"proxyrouter/internal/router"
+	"proxyrouter/internal/version"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/render"
@@ -97,10 +98,21 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	response := HealthResponse{
 		Status:    "healthy",
 		Timestamp: time.Now(),
-		Version:   "1.0.0", // TODO: Get from build info
+		Version:   version.Short(),
 		Uptime:    "0s",    // TODO: Calculate actual uptime
 	}
 
+	render.JSON(w, r, response)
+}
+
+// Version handles version requests
+func (h *Handler) Version(w http.ResponseWriter, r *http.Request) {
+	response := map[string]interface{}{
+		"version":    version.Version,
+		"commit":     version.Commit,
+		"build_date": version.BuildDate,
+		"go_version": version.GoVersion,
+	}
 	render.JSON(w, r, response)
 }
 

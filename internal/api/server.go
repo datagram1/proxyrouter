@@ -44,9 +44,10 @@ func (s *Server) setupRoutes() {
 	s.chiRouter.Use(middleware.Recoverer)
 	s.chiRouter.Use(middleware.Timeout(60 * time.Second))
 
-	// Health check and metrics
+	// Health check, metrics, and version
 	s.chiRouter.Get("/healthz", s.handler.HealthCheck)
 	s.chiRouter.Get("/metrics", s.metrics)
+	s.chiRouter.Get("/version", s.handler.Version)
 
 	// API v1 routes
 	s.chiRouter.Route("/api/v1", func(r chi.Router) {

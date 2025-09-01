@@ -44,7 +44,7 @@ func New(db *sql.DB) *Router {
 // FindRoute finds the best matching route for a request
 func (r *Router) FindRoute(ctx context.Context, clientIP, targetHost string) (*Route, error) {
 	query := `
-		SELECT id, client_cidr, host_glob, group, proxy_id, precedence, enabled, created_at
+		SELECT id, client_cidr, host_glob, "group", proxy_id, precedence, enabled, created_at
 		FROM routes
 		WHERE enabled = 1
 		ORDER BY precedence ASC, id ASC
@@ -166,7 +166,7 @@ func (r *Router) GetRoutes() ([]Route, error) {
 // GetRoutesWithContext returns all routes with context
 func (r *Router) GetRoutesWithContext(ctx context.Context) ([]Route, error) {
 	query := `
-		SELECT id, client_cidr, host_glob, group, proxy_id, precedence, enabled, created_at
+		SELECT id, client_cidr, host_glob, "group", proxy_id, precedence, enabled, created_at
 		FROM routes
 		ORDER BY precedence ASC, id ASC
 	`
@@ -222,7 +222,7 @@ func (r *Router) GetRoutesWithContext(ctx context.Context) ([]Route, error) {
 // CreateRouteWithContext creates a new route with context
 func (r *Router) CreateRouteWithContext(ctx context.Context, route *Route) error {
 	query := `
-		INSERT INTO routes (client_cidr, host_glob, group, proxy_id, precedence, enabled)
+		INSERT INTO routes (client_cidr, host_glob, "group", proxy_id, precedence, enabled)
 		VALUES (?, ?, ?, ?, ?, ?)
 	`
 	

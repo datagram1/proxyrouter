@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -18,12 +19,20 @@ import (
 	"proxyrouter/internal/proxysocks"
 	"proxyrouter/internal/refresh"
 	"proxyrouter/internal/router"
+	"proxyrouter/internal/version"
 )
 
 func main() {
 	// Parse command line flags
 	configPath := flag.String("config", "configs/config.yaml", "Path to configuration file")
+	showVersion := flag.Bool("version", false, "Show version information")
 	flag.Parse()
+
+	// Handle version flag
+	if *showVersion {
+		fmt.Printf("ProxyRouter %s\n", version.Info())
+		os.Exit(0)
+	}
 
 	// Load configuration
 	cfg, err := config.Load(*configPath)
@@ -54,6 +63,9 @@ func main() {
 	)
 	refresher := refresh.New(database.GetDB(), &cfg.Refresh)
 
+	// Initialize job manager
+	refreshJobManager := refresh.NewJobManager(refresher, cfg, slog.Default())
+
 	// Initialize servers
 	httpProxy := proxyhttp.New(
 		cfg.Listen.HTTPProxy,
@@ -68,6 +80,7 @@ func main() {
 		aclManager,
 		routerEngine,
 		dialerFactory,
+		cfg.GetDialTimeout(),
 	)
 
 	apiServer := api.New(
@@ -92,6 +105,12 @@ func main() {
 		fmt.Printf("Received signal %v, shutting down...\n", sig)
 		cancel()
 	}()
+
+	// Start job manager
+	if err := refreshJobManager.Start(ctx); err != nil {
+		log.Fatalf("Failed to start refresh job manager: %v", err)
+	}
+	defer refreshJobManager.Stop()
 
 	// Start servers
 	errChan := make(chan error, 3)

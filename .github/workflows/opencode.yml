@@ -1,0 +1,33 @@
+name: opencode
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  opencode:
+    if: |
+      contains(github.event.comment.body, ' /oc') ||
+      startsWith(github.event.comment.body, '/oc') ||
+      contains(github.event.comment.body, ' /opencode') ||
+      startsWith(github.event.comment.body, '/opencode')
+    runs-on: self-hosted   # <- runner inside your LAN
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run opencode via LM Studio (LAN)
+        uses: sst/opencode/github@latest
+        env:
+          # OpenAI-compatible vars most tools honor:
+          OPENAI_BASE_URL: http://192.168.11.26:1234/v1
+          OPENAI_API_KEY: ${{ secrets.LMSTUDIO_API_KEY }}   # can be "local-secret" if LM Studio doesn’t enforce
+          # Some builds also accept these aliases:
+          LMSTUDIO_BASE_URL: http://192.168.11.26:1234/v1
+          LMSTUDIO_API_KEY: ${{ secrets.LMSTUDIO_API_KEY }}
+        with:
+          # Use the EXACT id from /v1/models
+          model: qwen2.5-coder-14b-instruct

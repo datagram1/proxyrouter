@@ -229,6 +229,10 @@ func TestValidateConfig(t *testing.T) {
 					ReadMs:  60000,
 					WriteMs: 60000,
 				},
+				Refresh: RefreshConfig{
+					IntervalSec:          900,
+					HealthcheckConcurrency: 50,
+				},
 				Database: DatabaseConfig{
 					Path: "/tmp/test.db",
 				},
@@ -246,6 +250,10 @@ func TestValidateConfig(t *testing.T) {
 					DialMs:  8000,
 					ReadMs:  60000,
 					WriteMs: 60000,
+				},
+				Refresh: RefreshConfig{
+					IntervalSec:          900,
+					HealthcheckConcurrency: 50,
 				},
 				Database: DatabaseConfig{
 					Path: "/tmp/test.db",
@@ -266,6 +274,10 @@ func TestValidateConfig(t *testing.T) {
 					ReadMs:  60000,
 					WriteMs: 60000,
 				},
+				Refresh: RefreshConfig{
+					IntervalSec:          900,
+					HealthcheckConcurrency: 50,
+				},
 			},
 			wantErr: true,
 		},
@@ -281,6 +293,10 @@ func TestValidateConfig(t *testing.T) {
 					DialMs:  -1,
 					ReadMs:  60000,
 					WriteMs: 60000,
+				},
+				Refresh: RefreshConfig{
+					IntervalSec:          900,
+					HealthcheckConcurrency: 50,
 				},
 				Database: DatabaseConfig{
 					Path: "/tmp/test.db",
