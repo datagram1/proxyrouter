@@ -51,6 +51,12 @@ func (s *Server) setupRoutes() {
 
 	// API v1 routes
 	s.chiRouter.Route("/api/v1", func(r chi.Router) {
+		// Health check
+		r.Get("/healthz", s.handler.HealthCheck)
+
+		// Version
+		r.Get("/version", s.handler.Version)
+
 		// ACL routes
 		r.Route("/acl", func(r chi.Router) {
 			r.Get("/", s.handler.GetACL)
@@ -80,13 +86,19 @@ func (s *Server) setupRoutes() {
 			r.Get("/", s.handler.GetSettings)
 			r.Patch("/", s.handler.UpdateSettings)
 		})
+
+		// Tor Control
+		r.Route("/tor", func(r chi.Router) {
+			r.Get("/{action}", s.handler.TorControl)
+			r.Post("/{action}", s.handler.TorControl)
+		})
 	})
 }
 
 // Start starts the API server
 func (s *Server) Start(ctx context.Context) error {
 	fmt.Printf("API server listening on %s\n", s.listenAddr)
-	
+
 	server := &http.Server{
 		Addr:    s.listenAddr,
 		Handler: s.chiRouter,

@@ -15,9 +15,9 @@ type Dialer interface {
 
 // DialerFactory creates dialers based on route groups
 type DialerFactory struct {
-	db           *sql.DB
-	torAddress   string
-	dialTimeout  time.Duration
+	db          *sql.DB
+	torAddress  string
+	dialTimeout time.Duration
 }
 
 // NewDialerFactory creates a new dialer factory
@@ -54,9 +54,10 @@ func (f *DialerFactory) createLocalDialer() (Dialer, error) {
 
 // createTorDialer creates a Tor SOCKS5 dialer
 func (f *DialerFactory) createTorDialer() (Dialer, error) {
-	// TODO: Implement Tor SOCKS5 dialer when go-socks5 dependency is fixed
-	return &net.Dialer{
-		Timeout: f.dialTimeout,
+	// Create a SOCKS5 dialer that connects to Tor
+	return &SOCKS5Dialer{
+		proxyHost: f.torAddress,
+		timeout:   f.dialTimeout,
 	}, nil
 }
 
@@ -103,6 +104,116 @@ func (f *DialerFactory) createProxyDialer(proxy *Proxy) (Dialer, error) {
 		return f.createHTTPDialer(proxy)
 	default:
 		return nil, fmt.Errorf("unsupported proxy scheme: %s", proxy.Scheme)
+	}
+}
+
+// SOCKS5Dialer implements a SOCKS5 proxy dialer
+type SOCKS5Dialer struct {
+	proxyHost string
+	timeout   time.Duration
+}
+
+// DialContext implements the Dialer interface for SOCKS5
+func (d *SOCKS5Dialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	// Connect to the SOCKS5 proxy
+	proxyConn, err := net.DialTimeout("tcp", d.proxyHost, d.timeout)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to SOCKS5 proxy %s: %w", d.proxyHost, err)
+	}
+
+	// Perform SOCKS5 handshake
+	if err := d.performSOCKS5Handshake(proxyConn, addr); err != nil {
+		proxyConn.Close()
+		return nil, fmt.Errorf("SOCKS5 handshake failed: %w", err)
+	}
+
+	return proxyConn, nil
+}
+
+// performSOCKS5Handshake performs the SOCKS5 protocol handshake
+func (d *SOCKS5Dialer) performSOCKS5Handshake(conn net.Conn, targetAddr string) error {
+	// SOCKS5 greeting: version 5, 1 method (no authentication)
+	greeting := []byte{0x05, 0x01, 0x00}
+	if _, err := conn.Write(greeting); err != nil {
+		return err
+	}
+
+	// Read server response
+	response := make([]byte, 2)
+	if _, err := conn.Read(response); err != nil {
+		return err
+	}
+
+	if response[0] != 0x05 || response[1] != 0x00 {
+		return fmt.Errorf("SOCKS5 greeting failed: version=%d, method=%d", response[0], response[1])
+	}
+
+	// Parse target address
+	host, port, err := net.SplitHostPort(targetAddr)
+	if err != nil {
+		return fmt.Errorf("invalid target address: %w", err)
+	}
+
+	// Build connect request
+	ip := net.ParseIP(host)
+	var addrType byte
+	var addrBytes []byte
+
+	if ip != nil {
+		if ip.To4() != nil {
+			addrType = 0x01 // IPv4
+			addrBytes = ip.To4()
+		} else {
+			addrType = 0x04 // IPv6
+			addrBytes = ip.To16()
+		}
+	} else {
+		addrType = 0x03 // Domain name
+		addrBytes = []byte(host)
+	}
+
+	// Build request packet
+	portNum := uint16(0)
+	if _, err := fmt.Sscanf(port, "%d", &portNum); err != nil {
+		return fmt.Errorf("invalid port: %w", err)
+	}
+
+	request := []byte{0x05, 0x01, 0x00, addrType}
+	request = append(request, addrBytes...)
+	request = append(request, byte(portNum>>8), byte(portNum&0xFF))
+
+	if _, err := conn.Write(request); err != nil {
+		return err
+	}
+
+	// Read response
+	response = make([]byte, 4)
+	if _, err := conn.Read(response); err != nil {
+		return err
+	}
+
+	if response[0] != 0x05 || response[1] != 0x00 {
+		return fmt.Errorf("SOCKS5 connect failed: version=%d, status=%d", response[0], response[1])
+	}
+
+	// Skip the rest of the response (bound address)
+	addrType = response[3]
+	switch addrType {
+	case 0x01: // IPv4
+		_, err := conn.Read(make([]byte, 4+2))
+		return err
+	case 0x03: // Domain name
+		length := make([]byte, 1)
+		if _, err := conn.Read(length); err != nil {
+			return err
+		}
+		_, err := conn.Read(make([]byte, int(length[0])+2))
+		return err
+	case 0x04: // IPv6
+		_, err := conn.Read(make([]byte, 16+2))
+		return err
+	default:
+		return fmt.Errorf("unsupported address type: %d", addrType)
 	}
 }
 
@@ -207,7 +318,7 @@ func (h *HTTPProxyDialer) DialContext(ctx context.Context, network, addr string)
 	// For HTTP proxies, we need to establish a CONNECT tunnel
 	// This is a simplified implementation - in practice, you'd want to handle
 	// the full HTTP CONNECT protocol
-	
+
 	// For now, we'll use a direct connection as a fallback
 	dialer := &net.Dialer{
 		Timeout: h.timeout,

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"strings"
 	"time"
 
@@ -15,11 +16,11 @@ import (
 
 // Server represents the HTTP proxy server
 type Server struct {
-	listenAddr string
-	acl        *acl.ACL
-	router     *router.Router
+	listenAddr    string
+	acl           *acl.ACL
+	router        *router.Router
 	dialerFactory *router.DialerFactory
-	timeout    time.Duration
+	timeout       time.Duration
 }
 
 // New creates a new HTTP proxy server
@@ -156,14 +157,25 @@ func (s *Server) handleCONNECT(ctx context.Context, clientConn net.Conn, target,
 
 // handleHTTPRequest handles regular HTTP requests
 func (s *Server) handleHTTPRequest(ctx context.Context, clientConn net.Conn, method, target, version string, reader *bufio.Reader) {
-	// Parse the target URL
-	host, port, err := net.SplitHostPort(target)
+	// Parse the target URL - for HTTP proxy, target is a full URL
+	parsedURL, err := url.Parse(target)
 	if err != nil {
-		// Default to port 80 if not specified
-		host = target
-		port = "80"
-		target = net.JoinHostPort(host, port)
+		fmt.Printf("Failed to parse target URL %s: %v\n", target, err)
+		s.sendErrorResponse(clientConn, "400 Bad Request")
+		return
 	}
+
+	// Extract host and port
+	host := parsedURL.Hostname()
+	port := parsedURL.Port()
+	if port == "" {
+		if parsedURL.Scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	targetHostPort := net.JoinHostPort(host, port)
 
 	// Find route for this target
 	route, err := s.router.FindRoute(ctx, acl.ExtractClientIP(clientConn.RemoteAddr().String(), nil), host)
@@ -182,16 +194,16 @@ func (s *Server) handleHTTPRequest(ctx context.Context, clientConn net.Conn, met
 	}
 
 	// Connect to target
-	targetConn, err := dialer.DialContext(ctx, "tcp", target)
+	targetConn, err := dialer.DialContext(ctx, "tcp", targetHostPort)
 	if err != nil {
-		fmt.Printf("Failed to connect to %s: %v\n", target, err)
+		fmt.Printf("Failed to connect to %s: %v\n", targetHostPort, err)
 		s.sendErrorResponse(clientConn, "502 Bad Gateway")
 		return
 	}
 	defer targetConn.Close()
 
-	// Forward the request
-	if err := s.forwardHTTPRequest(targetConn, method, target, version, reader); err != nil {
+	// Forward the request - use the path from the parsed URL
+	if err := s.forwardHTTPRequest(targetConn, method, parsedURL.Path, version, reader); err != nil {
 		fmt.Printf("Failed to forward HTTP request: %v\n", err)
 		return
 	}
@@ -214,7 +226,8 @@ func (s *Server) parseRequestLine(line string) (method, target, version string, 
 
 // forwardHTTPRequest forwards an HTTP request to the target
 func (s *Server) forwardHTTPRequest(targetConn net.Conn, method, target, version string, reader *bufio.Reader) error {
-	// Write the request line
+	// Write the request line - use only the path for the target
+	// The target should be just the path, not the full URL
 	requestLine := fmt.Sprintf("%s %s %s\r\n", method, target, version)
 	if _, err := targetConn.Write([]byte(requestLine)); err != nil {
 		return err

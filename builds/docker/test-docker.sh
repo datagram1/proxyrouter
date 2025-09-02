@@ -97,7 +97,7 @@ metrics:
 admin:
   enabled: true
   bind: "0.0.0.0"
-  port: 5000
+  port: 6000
   basePath: "/admin"
   sessionSecret: ""
   allowCIDRs: ["0.0.0.0/0"]
@@ -124,14 +124,16 @@ services:
       - TZ=UTC
 
   proxyrouter:
-    build: .
+    build:
+      context: ../..
+      dockerfile: builds/docker/Dockerfile
     depends_on: [tor]
     restart: unless-stopped
     ports:
       - "8080:8080"   # HTTP proxy
       - "1080:1080"   # SOCKS5 proxy
       - "8081:8081"   # API
-      - "5000:5000"   # Admin UI
+      - "6000:6000"   # Admin UI
     volumes:
       - ./data:/var/lib/proxyr
       - ./docker-test-config.yaml:/etc/proxyrouter/config.yaml:ro
@@ -146,7 +148,7 @@ EOF
 # Build and start services
 start_services() {
     print_status "Building Docker image..."
-    docker build -t proxyrouter:test .
+    docker build -t proxyrouter:test -f Dockerfile ../..
     
     print_status "Creating data directory..."
     mkdir -p data
@@ -207,7 +209,7 @@ test_services() {
         
         # Test Admin UI
         print_status "Testing Admin UI..."
-        if curl -s http://localhost:5000/admin/login > /dev/null; then
+        if curl -s http://localhost:6000/admin/login > /dev/null; then
             print_success "Admin UI is accessible"
         else
             print_error "Admin UI is not accessible"
@@ -231,7 +233,7 @@ show_info() {
     echo "  HTTP Proxy:     http://localhost:8080"
     echo "  SOCKS5 Proxy:   socks5://localhost:1080"
     echo "  API:           http://localhost:8081"
-    echo "  Admin UI:      http://localhost:5000/admin"
+    echo "  Admin UI:      http://localhost:6000/admin"
     echo "  Tor:           socks5://localhost:9050"
     echo ""
     echo "  Default Admin Credentials:"
@@ -299,7 +301,7 @@ main() {
 }
 
 # Handle script interruption
-trap cleanup EXIT
+# trap cleanup EXIT
 
 # Run main function
 main "$@"

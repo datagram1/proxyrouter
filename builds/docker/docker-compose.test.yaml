@@ -6,11 +6,16 @@ services:
     restart: unless-stopped
     ports:
       - "9050:9050"
+      - "9051:9051"
     environment:
       - TZ=UTC
+      - CONTROL_PORT=9051
+      - CONTROL_BIND=0.0.0.0
 
   proxyrouter:
-    build: .
+    build:
+      context: ../..
+      dockerfile: builds/docker/Dockerfile
     depends_on: [tor]
     restart: unless-stopped
     ports:
@@ -20,7 +25,7 @@ services:
       - "6000:6000"   # Admin UI
     volumes:
       - ./data:/var/lib/proxyr
-      - ./docker-config.yaml:/etc/proxyrouter/config.yaml:ro
+      - ./docker-test-config.yaml:/etc/proxyrouter/config.yaml:ro
     environment:
       - TOR_SOCKS=tor:9050
     command: ["/usr/local/bin/proxyrouter", "-config", "/etc/proxyrouter/config.yaml"]

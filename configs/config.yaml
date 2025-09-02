@@ -8,14 +8,14 @@ listen:
 
 # Timeout settings (in milliseconds)
 timeouts:
-  dial_ms: 8000
-  read_ms: 60000
-  write_ms: 60000
+  dial_ms: 3000
+  read_ms: 10000
+  write_ms: 10000
 
 # Tor configuration
 tor:
-  enabled: true
-  socks_address: "127.0.0.1:9050"
+  enabled: false
+  socks_address: "tor:9050"
 
 # Refresh configuration
 refresh:
