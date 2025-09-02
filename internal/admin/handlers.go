@@ -29,12 +29,13 @@ type Handlers struct {
 }
 
 // NewHandlers creates a new handlers instance
-func NewHandlers(cfg *config.Config, database *db.Database, authManager *AuthManager, middleware *Middleware) *Handlers {
+func NewHandlers(cfg *config.Config, database *db.Database, authManager *AuthManager, middleware *Middleware, refresher *refresh.Refresher) *Handlers {
 	h := &Handlers{
 		config:      cfg,
 		database:    database,
 		authManager: authManager,
 		middleware:  middleware,
+		refresher:   refresher,
 	}
 
 	// Load templates
@@ -413,6 +414,31 @@ func (h *Handlers) PostSettings(w http.ResponseWriter, r *http.Request) {
 // UploadForm displays the proxy upload form
 func (h *Handlers) UploadForm(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
+
+	// Get session from context
+	session, ok := r.Context().Value("session").(*Session)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Generate CSRF token
+	csrfToken := h.middleware.generateCSRFToken(session.Username)
+
+	// Get success message parameters
+	imported := r.URL.Query().Get("imported")
+	updated := r.URL.Query().Get("updated")
+	skipped := r.URL.Query().Get("skipped")
+
+	var successMessage string
+	if imported != "" {
+		successMessage = fmt.Sprintf(`
+			<div class="alert alert-success">
+				<strong>Upload successful!</strong><br>
+				Imported: %s | Updated: %s | Skipped: %s
+			</div>
+		`, imported, updated, skipped)
+	}
 	fmt.Fprintf(w, `
 <!DOCTYPE html>
 <html>
@@ -430,6 +456,13 @@ func (h *Handlers) UploadForm(w http.ResponseWriter, r *http.Request) {
         .form-group input, .form-group textarea { width: 100%%; padding: 8px; }
         .btn { background: #007cba; color: white; padding: 10px 20px; border: none; cursor: pointer; }
         .btn:hover { background: #005a87; }
+        .btn:disabled { background: #6c757d; cursor: not-allowed; }
+        .input-method { margin-bottom: 10px; padding: 10px; border-radius: 4px; }
+        .input-method.file { background: #e7f3ff; border-left: 4px solid #007cba; }
+        .input-method.text { background: #fff3cd; border-left: 4px solid #ffc107; }
+        .input-method.none { background: #f8d7da; border-left: 4px solid #dc3545; }
+        .alert { padding: 15px; margin: 20px 0; border-radius: 4px; }
+        .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
     </style>
 </head>
 <body>
@@ -447,23 +480,76 @@ func (h *Handlers) UploadForm(w http.ResponseWriter, r *http.Request) {
             </form>
         </div>
         <div class="content">
+            %s
             <h2>Upload Proxy List</h2>
-            <form method="post" action="/admin/upload" enctype="multipart/form-data">
+            <div id="input-method-indicator" class="input-method none">
+                <strong>Please provide either a file or paste proxies in the text area below.</strong>
+            </div>
+            <form method="post" action="/admin/upload" enctype="multipart/form-data" id="upload-form">
+                <input type="hidden" name="csrf_token" value="%s">
                 <div class="form-group">
                     <label>File (.txt or .csv):</label>
-                    <input type="file" name="file" accept=".txt,.csv" required>
+                    <input type="file" name="file" accept=".txt,.csv" id="file-input">
                 </div>
                 <div class="form-group">
                     <label>Or paste proxies (one per line, format: host:port or scheme://host:port):</label>
-                    <textarea name="proxies" rows="10" placeholder="127.0.0.1:8080&#10;http://proxy.example.com:3128&#10;socks5://socks.example.com:1080"></textarea>
+                    <textarea name="proxies" rows="10" placeholder="127.0.0.1:8080&#10;http://proxy.example.com:3128&#10;socks5://socks.example.com:1080" id="proxies-textarea"></textarea>
                 </div>
-                <button type="submit" class="btn">Upload Proxies</button>
+                <button type="submit" class="btn" id="submit-btn" disabled>Upload Proxies</button>
             </form>
         </div>
     </div>
+    
+    <script>
+        const fileInput = document.getElementById('file-input');
+        const textarea = document.getElementById('proxies-textarea');
+        const submitBtn = document.getElementById('submit-btn');
+        const indicator = document.getElementById('input-method-indicator');
+        
+        function updateFormState() {
+            const hasFile = fileInput.files && fileInput.files.length > 0;
+            const hasText = textarea.value.trim() !== '';
+            
+            // Check if there's a success message on the page
+            const successMessage = document.querySelector('.alert-success');
+            if (successMessage) {
+                // If there's a success message, hide the indicator and disable the submit button
+                indicator.style.display = 'none';
+                submitBtn.disabled = true;
+                return;
+            }
+            
+            // Show the indicator if there's no success message
+            indicator.style.display = 'block';
+            
+            if (hasFile && hasText) {
+                indicator.className = 'input-method file';
+                indicator.innerHTML = '<strong>File upload will be used.</strong> Text area content will be ignored.';
+                submitBtn.disabled = false;
+            } else if (hasFile) {
+                indicator.className = 'input-method file';
+                indicator.innerHTML = '<strong>File upload will be used.</strong>';
+                submitBtn.disabled = false;
+            } else if (hasText) {
+                indicator.className = 'input-method text';
+                indicator.innerHTML = '<strong>Text area content will be used.</strong>';
+                submitBtn.disabled = false;
+            } else {
+                indicator.className = 'input-method none';
+                indicator.innerHTML = '<strong>Please provide either a file or paste proxies in the text area below.</strong>';
+                submitBtn.disabled = true;
+            }
+        }
+        
+        fileInput.addEventListener('change', updateFormState);
+        textarea.addEventListener('input', updateFormState);
+        
+        // Initialize state
+        updateFormState();
+    </script>
 </body>
 </html>
-`)
+`, successMessage, csrfToken)
 }
 
 // UploadProxies handles proxy upload
@@ -775,4 +861,60 @@ func (h *Handlers) getChangePasswordButton(usingDefaultPassword bool) string {
 	}
 
 	return `<a href="/admin/users/change-password" class="btn" style="background: #856404; margin-right: 10px;">Change Password</a>`
+}
+
+// RunRefresh handles manual refresh requests
+func (h *Handlers) RunRefresh(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get session from context
+	session, ok := r.Context().Value("session").(*Session)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Run refresh
+	if err := h.refresher.RefreshAll(r.Context()); err != nil {
+		slog.Error("Failed to run refresh", "error", err)
+		http.Error(w, fmt.Sprintf("Failed to run refresh: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Log audit event
+	h.authManager.LogAudit(r.Context(), session.Username, "refresh", "manual refresh triggered", h.middleware.getClientIP(r))
+
+	// Redirect back to dashboard with success message
+	http.Redirect(w, r, "/admin/?refresh=success", http.StatusSeeOther)
+}
+
+// RunHealthCheck handles manual health check requests
+func (h *Handlers) RunHealthCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get session from context
+	session, ok := r.Context().Value("session").(*Session)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Run health check
+	if err := h.refresher.HealthCheck(r.Context()); err != nil {
+		slog.Error("Failed to run health check", "error", err)
+		http.Error(w, fmt.Sprintf("Failed to run health check: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Log audit event
+	h.authManager.LogAudit(r.Context(), session.Username, "health_check", "manual health check triggered", h.middleware.getClientIP(r))
+
+	// Redirect back to dashboard with success message
+	http.Redirect(w, r, "/admin/?health_check=success", http.StatusSeeOther)
 }

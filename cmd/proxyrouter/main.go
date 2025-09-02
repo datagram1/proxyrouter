@@ -139,7 +139,7 @@ func main() {
 
 	// Start admin server if enabled
 	if cfg.Admin.Enabled {
-		adminServer := admin.NewServer(cfg, database)
+		adminServer := admin.NewServer(cfg, database, refresher)
 		go func() {
 			if err := adminServer.Start(ctx); err != nil {
 				errChan <- fmt.Errorf("Admin server error: %w", err)

@@ -69,16 +69,17 @@ type RouteResponse struct {
 
 // Proxy represents a proxy entry
 type Proxy struct {
-	ID           int     `json:"id"`
-	Scheme       string  `json:"scheme"`
-	Host         string  `json:"host"`
-	Port         int     `json:"port"`
-	Source       string  `json:"source"`
-	Alive        bool    `json:"alive"`
-	LatencyMs    *int    `json:"latency_ms,omitempty"`
-	LastChecked  *string `json:"last_checked_at,omitempty"`
-	ErrorMessage *string `json:"error_message,omitempty"`
-	CreatedAt    string  `json:"created_at"`
+	ID              int     `json:"id"`
+	ProxyType       string  `json:"proxy_type"`
+	IP              string  `json:"ip"`
+	Port            int     `json:"port"`
+	Source          string  `json:"source"`
+	Working         bool    `json:"working"`
+	Latency         *int    `json:"latency,omitempty"`
+	TestedTimestamp *string `json:"tested_timestamp,omitempty"`
+	ErrorMessage    *string `json:"error_message,omitempty"`
+	CreatedAt       string  `json:"created_at"`
+	ProxyURL        *string `json:"proxy_url,omitempty"`
 }
 
 // Setting represents a setting entry
@@ -435,8 +436,8 @@ func (h *Handler) DeleteRoute(w http.ResponseWriter, r *http.Request) {
 // GetProxies handles GET /proxies requests
 func (h *Handler) GetProxies(w http.ResponseWriter, r *http.Request) {
 	query := `
-		SELECT id, scheme, host, port, source, alive, latency_ms, 
-		       last_checked_at, error_message, created_at
+		SELECT id, proxy_type, ip, port, source, working, latency, 
+		       tested_timestamp, error_message, created_at, proxy_url
 		FROM proxies
 		ORDER BY created_at DESC
 	`
@@ -455,22 +456,26 @@ func (h *Handler) GetProxies(w http.ResponseWriter, r *http.Request) {
 	var proxies []Proxy
 	for rows.Next() {
 		var proxy Proxy
-		var lastChecked sql.NullString
+		var testedTimestamp sql.NullString
 		var errorMessage sql.NullString
+		var proxyURL sql.NullString
 
 		err := rows.Scan(
-			&proxy.ID, &proxy.Scheme, &proxy.Host, &proxy.Port, &proxy.Source,
-			&proxy.Alive, &proxy.LatencyMs, &lastChecked, &errorMessage, &proxy.CreatedAt,
+			&proxy.ID, &proxy.ProxyType, &proxy.IP, &proxy.Port, &proxy.Source,
+			&proxy.Working, &proxy.Latency, &testedTimestamp, &errorMessage, &proxy.CreatedAt, &proxyURL,
 		)
 		if err != nil {
 			continue
 		}
 
-		if lastChecked.Valid {
-			proxy.LastChecked = &lastChecked.String
+		if testedTimestamp.Valid {
+			proxy.TestedTimestamp = &testedTimestamp.String
 		}
 		if errorMessage.Valid {
 			proxy.ErrorMessage = &errorMessage.String
+		}
+		if proxyURL.Valid {
+			proxy.ProxyURL = &proxyURL.String
 		}
 
 		proxies = append(proxies, proxy)
@@ -544,6 +549,20 @@ func (h *Handler) RefreshProxies(w http.ResponseWriter, r *http.Request) {
 	render.JSON(w, r, map[string]string{"status": "refreshed"})
 }
 
+// HealthCheckProxies handles POST /proxies/health-check requests
+func (h *Handler) HealthCheckProxies(w http.ResponseWriter, r *http.Request) {
+	if err := h.refresher.HealthCheck(context.Background()); err != nil {
+		render.JSON(w, r, ErrorResponse{
+			Error:   "health_check_error",
+			Message: fmt.Sprintf("Failed to run health check: %v", err),
+			Code:    http.StatusInternalServerError,
+		})
+		return
+	}
+
+	render.JSON(w, r, map[string]string{"status": "health_check_completed"})
+}
+
 // CheckProxy handles POST /proxies/{id}/check requests
 func (h *Handler) CheckProxy(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
@@ -558,9 +577,9 @@ func (h *Handler) CheckProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get proxy from database
-	query := `SELECT id, scheme, host, port FROM proxies WHERE id = ?`
+	query := `SELECT id, proxy_type, ip, port FROM proxies WHERE id = ?`
 	var proxy refresh.Proxy
-	err = h.db.QueryRow(context.Background(), query, id).Scan(&proxy.ID, &proxy.Scheme, &proxy.Host, &proxy.Port)
+	err = h.db.QueryRow(context.Background(), query, id).Scan(&proxy.ID, &proxy.ProxyType, &proxy.IP, &proxy.Port)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			render.JSON(w, r, ErrorResponse{
@@ -584,13 +603,13 @@ func (h *Handler) CheckProxy(w http.ResponseWriter, r *http.Request) {
 	// Update database
 	updateQuery := `
 		UPDATE proxies
-		SET alive = ?, latency_ms = ?, last_checked_at = CURRENT_TIMESTAMP, error_message = ?
+		SET working = ?, latency = ?, tested_timestamp = CURRENT_TIMESTAMP, error_message = ?
 		WHERE id = ?
 	`
 
 	var latency *int
-	if result.Alive {
-		latency = &result.LatencyMs
+	if result.Working {
+		latency = &result.Latency
 	}
 
 	var errorMsg *string
@@ -598,7 +617,7 @@ func (h *Handler) CheckProxy(w http.ResponseWriter, r *http.Request) {
 		errorMsg = &result.Error
 	}
 
-	_, err = h.db.Exec(context.Background(), updateQuery, result.Alive, latency, errorMsg, id)
+	_, err = h.db.Exec(context.Background(), updateQuery, result.Working, latency, errorMsg, id)
 	if err != nil {
 		render.JSON(w, r, ErrorResponse{
 			Error:   "database_error",

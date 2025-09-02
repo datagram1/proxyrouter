@@ -1,45 +1,67 @@
-listen:
-  http_proxy: "127.0.0.1:8080"
-  socks5_proxy: "127.0.0.1:1080"
-  api: "127.0.0.1:8081"
+# ProxyRouter Test Configuration
 
+# Listening addresses
+listen:
+  http_proxy: "0.0.0.0:8083"
+  socks5_proxy: "0.0.0.0:1081"
+  api: "0.0.0.0:8084"
+
+# Timeout settings (in milliseconds)
 timeouts:
-  dial_ms: 5000
+  dial_ms: 10000
   read_ms: 30000
   write_ms: 30000
 
+# Tor configuration
 tor:
   enabled: false
+  socks_address: "127.0.0.1:9050"
 
+# Refresh configuration
 refresh:
-  enable_general_sources: false
+  enable_general_sources: true
   interval_sec: 900
-  healthcheck_concurrency: 10
-  sources: []
+  healthcheck_concurrency: 50
+  sources:
+    - name: "socks5_list"
+      url: "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt"
+      type: "raw"
+    - name: "http_list"
+      url: "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt"
+      type: "raw"
 
+# Database configuration
 database:
-  path: "./test.db"
+  path: "./data/router.db"
 
+# Logging configuration
 logging:
   level: "info"
   format: "text"
 
+# Metrics configuration
 metrics:
   enabled: true
   path: "/metrics"
 
+# Admin UI configuration
 admin:
   enabled: true
-  bind: "127.0.0.1"
-  port: 5001
-  basePath: "/admin"
-  sessionSecret: ""
-  allowCIDRs: ["127.0.0.1/32"]
+  bind: "0.0.0.0"
+  port: 8085
+  base_path: "/admin"
+  session_secret: ""  # Will be auto-generated if empty
+  allow_cidrs:
+    - "127.0.0.1/32"
+    - "::1/128"
   tls:
     enabled: false
+    cert_file: ""
+    key_file: ""
 
+# Security configuration
 security:
-  passwordHash: "argon2id"
+  password_hash: "argon2id"
   login:
-    maxAttempts: 10
-    windowSeconds: 900
+    max_attempts: 10
+    window_seconds: 900

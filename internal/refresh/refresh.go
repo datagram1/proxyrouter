@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
+	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -150,11 +152,13 @@ func (r *Refresher) parseHTMLSource(content, sourceName string) ([]Proxy, error)
 				continue
 			}
 
+			proxyURL := fmt.Sprintf("socks5://%s:%d", ip, port)
 			proxy := Proxy{
-				Scheme: "socks5", // Default to SOCKS5
-				Host:   ip,
-				Port:   port,
-				Source: sourceName,
+				ProxyType: "socks5", // Default to SOCKS5
+				IP:        ip,
+				Port:      port,
+				Source:    sourceName,
+				ProxyURL:  &proxyURL,
 			}
 
 			proxies = append(proxies, proxy)
@@ -222,11 +226,13 @@ func (r *Refresher) parseProxyLine(line, sourceName string) (Proxy, error) {
 				continue
 			}
 
+			proxyURL := fmt.Sprintf("%s://%s:%d", schemes[i], ip, port)
 			return Proxy{
-				Scheme: schemes[i],
-				Host:   ip,
-				Port:   port,
-				Source: sourceName,
+				ProxyType: schemes[i],
+				IP:        ip,
+				Port:      port,
+				Source:    sourceName,
+				ProxyURL:  &proxyURL,
 			}, nil
 		}
 	}
@@ -254,8 +260,8 @@ func (r *Refresher) importProxies(ctx context.Context, proxies []Proxy) error {
 
 	// Prepare insert statement
 	stmt, err := tx.PrepareContext(ctx, `
-		INSERT OR IGNORE INTO proxies (scheme, host, port, source, alive, created_at)
-		VALUES (?, ?, ?, ?, 0, CURRENT_TIMESTAMP)
+		INSERT OR IGNORE INTO proxies (proxy_type, ip, port, source, working, created_at, proxy_url)
+		VALUES (?, ?, ?, ?, 0, CURRENT_TIMESTAMP, ?)
 	`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare statement: %w", err)
@@ -264,9 +270,9 @@ func (r *Refresher) importProxies(ctx context.Context, proxies []Proxy) error {
 
 	// Insert proxies
 	for _, proxy := range proxies {
-		_, err := stmt.ExecContext(ctx, proxy.Scheme, proxy.Host, proxy.Port, proxy.Source)
+		_, err := stmt.ExecContext(ctx, proxy.ProxyType, proxy.IP, proxy.Port, proxy.Source, proxy.ProxyURL)
 		if err != nil {
-			return fmt.Errorf("failed to insert proxy %s:%d: %w", proxy.Host, proxy.Port, err)
+			return fmt.Errorf("failed to insert proxy %s:%d: %w", proxy.IP, proxy.Port, err)
 		}
 	}
 
@@ -282,11 +288,11 @@ func (r *Refresher) importProxies(ctx context.Context, proxies []Proxy) error {
 func (r *Refresher) HealthCheck(ctx context.Context) error {
 	// Get proxies that need health checking
 	query := `
-		SELECT id, scheme, host, port
+		SELECT id, proxy_type, ip, port
 		FROM proxies
-		WHERE alive = 0
-		   OR last_checked_at IS NULL
-		   OR last_checked_at < datetime('now', '-1 hour')
+		WHERE working = 0
+		   OR tested_timestamp IS NULL
+		   OR tested_timestamp < datetime('now', '-1 hour')
 		LIMIT ?
 	`
 
@@ -299,7 +305,7 @@ func (r *Refresher) HealthCheck(ctx context.Context) error {
 	var proxies []Proxy
 	for rows.Next() {
 		var proxy Proxy
-		err := rows.Scan(&proxy.ID, &proxy.Scheme, &proxy.Host, &proxy.Port)
+		err := rows.Scan(&proxy.ID, &proxy.ProxyType, &proxy.IP, &proxy.Port)
 		if err != nil {
 			continue
 		}
@@ -307,28 +313,55 @@ func (r *Refresher) HealthCheck(ctx context.Context) error {
 	}
 
 	if len(proxies) == 0 {
+		fmt.Println("No proxies need health checking")
 		return nil
 	}
+
+	fmt.Printf("Starting health check for %d proxies with %d concurrent workers...\n", len(proxies), r.config.HealthcheckConcurrency)
 
 	// Perform health checks concurrently
 	var wg sync.WaitGroup
 	semaphore := make(chan struct{}, r.config.HealthcheckConcurrency)
 	results := make(chan HealthCheckResult, len(proxies))
 
+	// Start a goroutine to print progress like tqdm
+	workingCount := 0
+	totalChecked := 0
+	progressTicker := time.NewTicker(2 * time.Second)
+	defer progressTicker.Stop()
+
+	go func() {
+		for range progressTicker.C {
+			percentage := float64(totalChecked) / float64(len(proxies)) * 100
+			barLength := 30
+			filledLength := int(float64(barLength) * percentage / 100)
+			bar := strings.Repeat("█", filledLength) + strings.Repeat("░", barLength-filledLength)
+			fmt.Printf("\r[%s] %d/%d (%d working) %.1f%%", bar, totalChecked, len(proxies), workingCount, percentage)
+		}
+	}()
+
 	for _, proxy := range proxies {
 		wg.Add(1)
 		go func(p Proxy) {
 			defer wg.Done()
 			semaphore <- struct{}{} // Acquire semaphore
-			defer func() { <-semaphore }() // Release semaphore
+			defer func() {
+				<-semaphore // Release semaphore
+				totalChecked++
+			}()
 
 			result := r.checkProxyHealth(ctx, p)
+			if result.Working {
+				workingCount++
+			}
 			results <- result
 		}(proxy)
 	}
 
 	wg.Wait()
 	close(results)
+
+	fmt.Printf("\nHealth check completed: %d/%d proxies checked, %d working found\n", totalChecked, len(proxies), workingCount)
 
 	// Update database with results
 	return r.updateHealthCheckResults(ctx, results)
@@ -339,55 +372,138 @@ func (r *Refresher) CheckProxyHealth(ctx context.Context, proxy Proxy) HealthChe
 	return r.checkProxyHealth(ctx, proxy)
 }
 
-// checkProxyHealth checks the health of a single proxy
+// checkProxyHealth checks the health of a single proxy with intelligent type detection
 func (r *Refresher) checkProxyHealth(ctx context.Context, proxy Proxy) HealthCheckResult {
-	result := HealthCheckResult{
-		ProxyID: proxy.ID,
-		Alive:   false,
+	// Try the current scheme first
+	testResult := r.testProxyWithProtocol(ctx, proxy, proxy.ProxyType)
+	if testResult.Working {
+		// Current scheme works, no need to test other protocols
+		return testResult
 	}
 
-	// Create test URL
-	testURL := "http://httpbin.org/ip"
-	if proxy.Scheme == "socks5" {
-		testURL = "https://httpbin.org/ip"
+	// Current scheme failed, try the alternative protocol
+	var alternativeProtocol string
+	if proxy.ProxyType == "socks5" {
+		alternativeProtocol = "http"
+	} else {
+		alternativeProtocol = "socks5"
 	}
+
+	alternativeResult := r.testProxyWithProtocol(ctx, proxy, alternativeProtocol)
+	if alternativeResult.Working {
+		// Alternative protocol works, update the proxy type in database
+		if err := r.updateProxyType(ctx, proxy.ID, alternativeProtocol); err != nil {
+			slog.Error("Failed to update proxy type", "proxy_id", proxy.ID, "proxy_type", alternativeProtocol, "error", err)
+		}
+		return alternativeResult
+	}
+
+	// Neither protocol works, return the current scheme result (which has the original error)
+	return testResult
+}
+
+// testProxyWithProtocol tests a proxy with a specific protocol
+func (r *Refresher) testProxyWithProtocol(ctx context.Context, proxy Proxy, protocol string) HealthCheckResult {
+	result := HealthCheckResult{
+		ProxyID: proxy.ID,
+		Working: false,
+	}
+
+	// Use our test server to avoid getting banned by external providers
+	testURL := "http://ip.knws.co.uk"
 
 	// Create HTTP client with proxy
 	client := &http.Client{
-		Timeout: 10 * time.Second,
+		Timeout: 10 * time.Second, // 10 second timeout for faster health checks
 		Transport: &http.Transport{
 			Proxy: func(req *http.Request) (*url.URL, error) {
-				proxyURL := fmt.Sprintf("%s://%s:%d", proxy.Scheme, proxy.Host, proxy.Port)
+				proxyURL := fmt.Sprintf("%s://%s:%d", protocol, proxy.IP, proxy.Port)
 				return url.Parse(proxyURL)
 			},
 		},
 	}
 
-	// Make test request
+	proxyAddr := fmt.Sprintf("%s:%d", proxy.IP, proxy.Port)
+	fmt.Printf("Testing %s -> %s...\n", proxyAddr, testURL)
+
+	// Make test request with browser-like headers
 	req, err := http.NewRequestWithContext(ctx, "GET", testURL, nil)
 	if err != nil {
+		fmt.Printf("  Failed to create request: %v\n", err)
 		result.Error = err.Error()
 		return result
 	}
+
+	// Add comprehensive browser-like headers to avoid detection
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	req.Header.Set("DNT", "1")
+	req.Header.Set("Connection", "keep-alive")
+	req.Header.Set("Upgrade-Insecure-Requests", "1")
+	req.Header.Set("Sec-Fetch-Dest", "document")
+	req.Header.Set("Sec-Fetch-Mode", "navigate")
+	req.Header.Set("Sec-Fetch-Site", "none")
+	req.Header.Set("Sec-Fetch-User", "?1")
+	req.Header.Set("Cache-Control", "max-age=0")
+	req.Header.Set("Sec-Ch-Ua", "\"Not_A Brand\";v=\"8\", \"Chromium\";v=\"120\", \"Google Chrome\";v=\"120\"")
+	req.Header.Set("Sec-Ch-Ua-Mobile", "?0")
+	req.Header.Set("Sec-Ch-Ua-Platform", "\"Windows\"")
 
 	start := time.Now()
 	resp, err := client.Do(req)
 	duration := time.Since(start)
 
 	if err != nil {
+		// Format error message similar to Python's urllib3 output
+		errorMsg := err.Error()
+		if strings.Contains(errorMsg, "timeout") || strings.Contains(errorMsg, "deadline") {
+			errorMsg = fmt.Sprintf("Connection to %s timed out. (connect timeout=10)", testURL)
+		} else if strings.Contains(errorMsg, "unexpected protocol version 72") || strings.Contains(errorMsg, "protocol version 72") {
+			errorMsg = "SOCKS5 proxy server sent invalid data"
+		} else if strings.Contains(errorMsg, "connection refused") {
+			errorMsg = "Failed to establish a new connection: Connection refused"
+		} else if strings.Contains(errorMsg, "connection closed") {
+			errorMsg = "Failed to establish a new connection: Connection closed unexpectedly"
+		}
+
+		fmt.Printf("❌ %s -> %s: %s (%.2fs)\n", proxyAddr, testURL, errorMsg, duration.Seconds())
 		result.Error = err.Error()
 		return result
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusOK {
-		result.Alive = true
-		result.LatencyMs = int(duration.Milliseconds())
+	// Use more lenient success criteria: any response from 200-499 indicates proxy is working
+	if resp.StatusCode >= 200 && resp.StatusCode < 500 {
+		// Try to read response body to get IP if possible
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			fmt.Printf("  ⚠️ Success but failed to read response body: %v\n", err)
+		} else {
+			// Parse plain text IP response from our test server
+			ipAddress := strings.TrimSpace(string(body))
+			if ipAddress != "" && net.ParseIP(ipAddress) != nil {
+				fmt.Printf("✅ %s -> %s (%.3fs)\n", proxyAddr, ipAddress, duration.Seconds())
+			} else {
+				fmt.Printf("✅ %s -> HTTP %d (%.3fs)\n", proxyAddr, resp.StatusCode, duration.Seconds())
+			}
+		}
+		result.Working = true
+		result.Latency = int(duration.Milliseconds())
+		return result
 	} else {
+		fmt.Printf("❌ %s -> HTTP %d (%.3fs)\n", proxyAddr, resp.StatusCode, duration.Seconds())
 		result.Error = fmt.Sprintf("HTTP %d", resp.StatusCode)
+		return result
 	}
+}
 
-	return result
+// updateProxyType updates the proxy_type/protocol of a proxy in the database
+func (r *Refresher) updateProxyType(ctx context.Context, proxyID int, proxyType string) error {
+	query := `UPDATE proxies SET proxy_type = ? WHERE id = ?`
+	_, err := r.db.ExecContext(ctx, query, proxyType, proxyID)
+	return err
 }
 
 // updateHealthCheckResults updates the database with health check results
@@ -402,7 +518,7 @@ func (r *Refresher) updateHealthCheckResults(ctx context.Context, results <-chan
 	// Prepare update statement
 	stmt, err := tx.PrepareContext(ctx, `
 		UPDATE proxies
-		SET alive = ?, latency_ms = ?, last_checked_at = CURRENT_TIMESTAMP, error_message = ?
+		SET working = ?, latency = ?, tested_timestamp = CURRENT_TIMESTAMP, error_message = ?
 		WHERE id = ?
 	`)
 	if err != nil {
@@ -413,8 +529,8 @@ func (r *Refresher) updateHealthCheckResults(ctx context.Context, results <-chan
 	// Update each result
 	for result := range results {
 		var latency *int
-		if result.Alive {
-			latency = &result.LatencyMs
+		if result.Working {
+			latency = &result.Latency
 		}
 
 		var errorMsg *string
@@ -422,7 +538,7 @@ func (r *Refresher) updateHealthCheckResults(ctx context.Context, results <-chan
 			errorMsg = &result.Error
 		}
 
-		_, err := stmt.ExecContext(ctx, result.Alive, latency, errorMsg, result.ProxyID)
+		_, err := stmt.ExecContext(ctx, result.Working, latency, errorMsg, result.ProxyID)
 		if err != nil {
 			return fmt.Errorf("failed to update proxy %d: %w", result.ProxyID, err)
 		}
@@ -460,17 +576,18 @@ func (r *Refresher) isValidPort(port int) bool {
 
 // Proxy represents a proxy entry
 type Proxy struct {
-	ID     int    `json:"id,omitempty"`
-	Scheme string `json:"scheme"`
-	Host   string `json:"host"`
-	Port   int    `json:"port"`
-	Source string `json:"source"`
+	ID        int     `json:"id,omitempty"`
+	ProxyType string  `json:"proxy_type"`
+	IP        string  `json:"ip"`
+	Port      int     `json:"port"`
+	Source    string  `json:"source"`
+	ProxyURL  *string `json:"proxy_url,omitempty"`
 }
 
 // HealthCheckResult represents the result of a health check
 type HealthCheckResult struct {
-	ProxyID   int    `json:"proxy_id"`
-	Alive     bool   `json:"alive"`
-	LatencyMs int    `json:"latency_ms,omitempty"`
-	Error     string `json:"error,omitempty"`
+	ProxyID int    `json:"proxy_id"`
+	Working bool   `json:"working"`
+	Latency int    `json:"latency,omitempty"`
+	Error   string `json:"error,omitempty"`
 }

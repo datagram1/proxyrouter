@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>ProxyRouter</title>
+  <style>
+    body {
+      width: 320px;
+      min-height: 400px;
+      margin: 0;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f8f9fa;
+    }
+    
+    .header {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    
+    .header h1 {
+      margin: 0;
+      font-size: 18px;
+      color: #2c3e50;
+      font-weight: 600;
+    }
+    
+    .status-card {
+      background: white;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .status-indicator {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      margin-right: 8px;
+    }
+    
+    .status-connected {
+      background: #27ae60;
+    }
+    
+    .status-error {
+      background: #e74c3c;
+    }
+    
+    .status-disabled {
+      background: #95a5a6;
+    }
+    
+    .toggle-section {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    
+    .toggle-button {
+      background: #3498db;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    
+    .toggle-button:hover {
+      background: #2980b9;
+    }
+    
+    .toggle-button:disabled {
+      background: #bdc3c7;
+      cursor: not-allowed;
+    }
+    
+    .toggle-button.disabled {
+      background: #e74c3c;
+    }
+    
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    
+    .stat-item {
+      background: white;
+      padding: 12px;
+      border-radius: 6px;
+      text-align: center;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    
+    .stat-number {
+      font-size: 20px;
+      font-weight: bold;
+      color: #2c3e50;
+      display: block;
+    }
+    
+    .stat-label {
+      font-size: 12px;
+      color: #7f8c8d;
+      margin-top: 4px;
+    }
+    
+    .action-buttons {
+      display: flex;
+      gap: 8px;
+    }
+    
+    .action-button {
+      flex: 1;
+      background: #ecf0f1;
+      color: #2c3e50;
+      border: none;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    
+    .action-button:hover {
+      background: #d5dbdb;
+    }
+    
+    .action-button:disabled {
+      background: #ecf0f1;
+      color: #bdc3c7;
+      cursor: not-allowed;
+    }
+    
+    .loading {
+      text-align: center;
+      color: #7f8c8d;
+      font-style: italic;
+    }
+    
+    .error-message {
+      background: #fdf2f2;
+      color: #c53030;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      margin-bottom: 12px;
+    }
+    
+    .success-message {
+      background: #f0fff4;
+      color: #22543d;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      margin-bottom: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>ProxyRouter</h1>
+  </div>
+  
+  <div id="status-card" class="status-card">
+    <div id="status-content">
+      <div class="loading">Checking status...</div>
+    </div>
+  </div>
+  
+  <div class="toggle-section">
+    <button id="toggle-button" class="toggle-button" disabled>
+      Loading...
+    </button>
+  </div>
+  
+  <div id="stats-section" style="display: none;">
+    <div class="stats-grid">
+      <div class="stat-item">
+        <span id="total-proxies" class="stat-number">0</span>
+        <span class="stat-label">Total Proxies</span>
+      </div>
+      <div class="stat-item">
+        <span id="alive-proxies" class="stat-number">0</span>
+        <span class="stat-label">Alive Proxies</span>
+      </div>
+    </div>
+    
+    <div class="action-buttons">
+      <button id="refresh-stats" class="action-button">Refresh Stats</button>
+      <button id="health-check" class="action-button">Health Check</button>
+      <button id="open-options" class="action-button">Settings</button>
+    </div>
+  </div>
+  
+  <div id="message-container"></div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>

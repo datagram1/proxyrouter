@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>ProxyRouter Settings</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f8f9fa;
+    }
+    
+    .container {
+      background: white;
+      border-radius: 8px;
+      padding: 24px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    h1 {
+      color: #2c3e50;
+      margin-bottom: 24px;
+      text-align: center;
+    }
+    
+    .form-group {
+      margin-bottom: 20px;
+    }
+    
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 500;
+      color: #2c3e50;
+    }
+    
+    input[type="text"], input[type="number"], select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    
+    input[type="text"]:focus, input[type="number"]:focus, select:focus {
+      outline: none;
+      border-color: #3498db;
+      box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+    }
+    
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    
+    .checkbox-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    input[type="checkbox"] {
+      width: auto;
+    }
+    
+    .button-group {
+      display: flex;
+      gap: 12px;
+      margin-top: 24px;
+    }
+    
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 4px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    
+    .btn-primary {
+      background: #3498db;
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      background: #2980b9;
+    }
+    
+    .btn-secondary {
+      background: #ecf0f1;
+      color: #2c3e50;
+    }
+    
+    .btn-secondary:hover {
+      background: #d5dbdb;
+    }
+    
+    .btn:disabled {
+      background: #bdc3c7;
+      cursor: not-allowed;
+    }
+    
+    .status-message {
+      padding: 12px;
+      border-radius: 4px;
+      margin-bottom: 16px;
+      font-size: 14px;
+    }
+    
+    .status-success {
+      background: #f0fff4;
+      color: #22543d;
+      border: 1px solid #9ae6b4;
+    }
+    
+    .status-error {
+      background: #fdf2f2;
+      color: #c53030;
+      border: 1px solid #feb2b2;
+    }
+    
+    .section {
+      border-top: 1px solid #eee;
+      padding-top: 20px;
+      margin-top: 20px;
+    }
+    
+    .section h2 {
+      color: #34495e;
+      font-size: 18px;
+      margin-bottom: 16px;
+    }
+    
+    .help-text {
+      font-size: 12px;
+      color: #7f8c8d;
+      margin-top: 4px;
+    }
+    
+    .routing-mode-info {
+      background: #f8f9fa;
+      padding: 12px;
+      border-radius: 4px;
+      margin-top: 8px;
+      font-size: 12px;
+      color: #495057;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>ProxyRouter Settings</h1>
+    
+    <div id="status-message"></div>
+    
+    <form id="settings-form">
+      <div class="section">
+        <h2>Proxy Server Configuration</h2>
+        
+        <div class="form-row">
+          <div class="form-group">
+            <label for="proxyHost">Proxy Host</label>
+            <input type="text" id="proxyHost" name="proxyHost" placeholder="localhost">
+            <div class="help-text">Hostname or IP address of your ProxyRouter server</div>
+          </div>
+          
+          <div class="form-group">
+            <label for="proxyPort">Proxy Port</label>
+            <input type="number" id="proxyPort" name="proxyPort" placeholder="8080" min="1" max="65535">
+            <div class="help-text">HTTP proxy port (default: 8080)</div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="section">
+        <h2>API Configuration</h2>
+        
+        <div class="form-row">
+          <div class="form-group">
+            <label for="apiHost">API Host</label>
+            <input type="text" id="apiHost" name="apiHost" placeholder="localhost">
+            <div class="help-text">Hostname for ProxyRouter API (usually same as proxy host)</div>
+          </div>
+          
+          <div class="form-group">
+            <label for="apiPort">API Port</label>
+            <input type="number" id="apiPort" name="apiPort" placeholder="8081" min="1" max="65535">
+            <div class="help-text">API port (default: 8081)</div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="section">
+        <h2>Routing Configuration</h2>
+        
+        <div class="form-group">
+          <label for="routingMode">Default Routing Mode</label>
+          <select id="routingMode" name="routingMode">
+            <option value="LOCAL">LOCAL - Direct connection</option>
+            <option value="GENERAL">GENERAL - Random healthy proxy</option>
+            <option value="TOR">TOR - Via Tor network</option>
+            <option value="UPSTREAM">UPSTREAM - Specific proxy</option>
+          </select>
+          <div class="routing-mode-info">
+            <strong>LOCAL:</strong> Bypass proxy for direct connections<br>
+            <strong>GENERAL:</strong> Use randomly selected healthy proxy from pool<br>
+            <strong>TOR:</strong> Route through Tor network (requires Tor daemon)<br>
+            <strong>UPSTREAM:</strong> Use specific proxy from database
+          </div>
+        </div>
+        
+        <div class="form-group">
+          <div class="checkbox-group">
+            <input type="checkbox" id="autoSwitch" name="autoSwitch">
+            <label for="autoSwitch">Auto-switch routing mode based on website</label>
+          </div>
+          <div class="help-text">Automatically choose routing mode based on destination (experimental)</div>
+        </div>
+      </div>
+      
+      <div class="button-group">
+        <button type="submit" class="btn btn-primary" id="save-button">Save Settings</button>
+        <button type="button" class="btn btn-secondary" id="reset-button">Reset to Defaults</button>
+        <button type="button" class="btn btn-secondary" id="test-connection">Test Connection</button>
+      </div>
+    </form>
+  </div>
+  
+  <script src="options.js"></script>
+</body>
+</html>

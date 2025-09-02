@@ -77,6 +77,7 @@ func (s *Server) setupRoutes() {
 			r.Get("/", s.handler.GetProxies)
 			r.Post("/import", s.handler.ImportProxies)
 			r.Post("/refresh", s.handler.RefreshProxies)
+			r.Post("/health-check", s.handler.HealthCheckProxies)
 			r.Post("/{id}/check", s.handler.CheckProxy)
 			r.Delete("/{id}", s.handler.DeleteProxy)
 		})

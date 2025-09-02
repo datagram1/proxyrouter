@@ -260,7 +260,7 @@ curl -X POST http://localhost:8081/v1/acl \
 # Import an upstream manually
 curl -X POST http://localhost:8081/v1/proxies/import \
   -H 'content-type: application/json' \
-  -d '[{"scheme":"socks5","host":"1.2.3.4","port":1080,"source":"manual"}]'
+  -d '[{"proxy_type":"socks5","ip":"1.2.3.4","port":1080,"source":"manual","proxy_url":"socks5://1.2.3.4:1080"}]'
 
 # Trigger refresh
 curl -X POST http://localhost:8081/v1/proxies/refresh
@@ -272,16 +272,18 @@ curl -X POST http://localhost:8081/v1/proxies/refresh
 ```sql
 CREATE TABLE proxies (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  scheme TEXT NOT NULL,             -- "socks5" | "http" | "https"
-  host TEXT NOT NULL,
+  proxy_type TEXT NOT NULL,         -- "socks5" | "http" | "https"
+  ip TEXT NOT NULL,
   port INTEGER NOT NULL,
   source TEXT,                      -- e.g., "spys.one-gb" or "manual"
-  latency_ms INTEGER,
-  alive INTEGER NOT NULL DEFAULT 1,
-  last_checked_at DATETIME,
+  latency INTEGER,                  -- latency in milliseconds
+  working INTEGER NOT NULL DEFAULT 1, -- 1=working, 0=not working
+  tested_timestamp DATETIME,         -- when last health check was performed
   expires_at DATETIME,              -- null = persistent
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE (scheme, host, port)
+  error_message TEXT,               -- error message from last health check
+  proxy_url TEXT,                   -- original import format (e.g., "socks5://40.172.232.213:13279")
+  UNIQUE (ip, port)
 );
 ```
 

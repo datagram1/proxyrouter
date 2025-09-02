@@ -5,8 +5,9 @@ Reusable proxy helper for MySQL-backed rotation across requests + Playwright.
 Usage:
     from proxies import Proxy_Helper
 
-    # Minimal DB creds (host is your MySQL server IP/DNS)
-    p = Proxy_Helper(db_user="root", db_password="secret", db_name="companies", db_host="192.168.10.230")
+    # Use config system to get DB credentials
+    from config import C
+    p = Proxy_Helper.from_config(C)
 
     # (Optional) Force-refresh from GitHub + validate all
     p.refresh_proxies(force=True, test_all=True)
@@ -54,7 +55,7 @@ Table assumed (MySQL 8+):
     ) ENGINE=InnoDB;
 
 Notes:
-- Requires MySQL 8 for SKIP LOCKED. If you’re on 5.7, change acquire logic to a single-row UPDATE ... LIMIT 1 claim pattern.
+- Requires MySQL 8 for SKIP LOCKED. If you're on 5.7, change acquire logic to a single-row UPDATE ... LIMIT 1 claim pattern.
 - SOCKS support needs `requests[socks]` (PySocks).
 """
 
@@ -141,7 +142,7 @@ class Proxy_Helper:
             table: str = "proxies",
             force_proxy_refresh: bool = False,
             proxy_sources: t.Optional[t.List[str]] = None,
-            test_target_url: str = "https://api.ipify.org?format=json",
+            test_target_url: str = "http://ip.knws.co.uk",
             test_timeout: int = 12,
     ):
         """
@@ -182,6 +183,24 @@ class Proxy_Helper:
 
         if force_proxy_refresh:
             self.refresh_proxies(force=True, test_all=True)
+
+    @classmethod
+    def from_config(cls, config, **kwargs):
+        """
+        Create Proxy_Helper instance from config object.
+        
+        Args:
+            config: Config object from config.py
+            **kwargs: Additional arguments to override config values
+        """
+        return cls(
+            db_user=kwargs.get('db_user', config.user),
+            db_password=kwargs.get('db_password', config.password),
+            db_name=kwargs.get('db_name', config.proxy_db),  # Use DATABASE_PROXY from config
+            db_host=kwargs.get('db_host', config.host),
+            db_port=kwargs.get('db_port', config.port),
+            **kwargs
+        )
 
     # --------------------------- DB ---------------------------
 
@@ -346,14 +365,9 @@ class Proxy_Helper:
                     resp = requests.get(target, timeout=self.test_timeout, proxies=proxies)
                     latency = time.perf_counter() - start
                     if resp.status_code == 200:
-                        try:
-                            data = resp.json()
-                            tested_ip = data.get("ip") or None
-                            ok = 1
-                        except Exception:
-                            # Fallback if endpoint returns plain text
-                            tested_ip = resp.text.strip()[:45]
-                            ok = 1 if tested_ip else 0
+                        # For ip.knws.co.uk, we expect a simple IP address as plain text
+                        tested_ip = resp.text.strip()[:45]
+                        ok = 1 if tested_ip else 0
                     else:
                         err = f"HTTP {resp.status_code}"
                 except Exception as e:
@@ -389,6 +403,331 @@ class Proxy_Helper:
         except Exception as e:
             print(f"❌ Proxy validation failed: {e}")
             raise
+
+    def test_specific_ip(self, ip: str, verbose: bool = False):
+        """
+        Test a specific IP address from the database.
+        """
+        try:
+            with self._cursor() as cur:
+                cur.execute(f"SELECT * FROM `{self.table}` WHERE ip = %s", (ip,))
+                row = cur.fetchone()
+
+            if not row:
+                print(f"❌ IP '{ip}' not found in database")
+                return False
+
+            print(f"🔍 Testing IP: {ip} (found in database)")
+            
+            # Test the proxy
+            success, result = self.test_proxy(row["proxy_url"], timeout=20, proxy_type=row.get("proxy_type"), verbose=verbose)
+            
+            if success:
+                print(f"✅ {ip} -> {result}")
+                return True
+            else:
+                print(f"❌ {ip} -> {result}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Error testing IP {ip}: {e}")
+            return False
+
+    def test_working_proxies(self, limit: int = None, verbose: bool = False, max_workers: int = 30):
+        """
+        Test only working proxies (working=1).
+        """
+        return self._test_proxies_with_condition("working=1", "working", limit, verbose, max_workers)
+
+    def test_failed_proxies(self, limit: int = None, verbose: bool = False, max_workers: int = 30):
+        """
+        Test only failed proxies (working=0).
+        """
+        return self._test_proxies_with_condition("working=0", "failed", limit, verbose, max_workers)
+
+    def test_untested_proxies(self, limit: int = None, verbose: bool = False, max_workers: int = 30):
+        """
+        Test only untested proxies (tested_timestamp IS NULL).
+        """
+        return self._test_proxies_with_condition("tested_timestamp IS NULL", "untested", limit, verbose, max_workers)
+
+    def _test_proxies_with_condition(self, condition: str, category: str, limit: int = None, verbose: bool = False, max_workers: int = 30):
+        """
+        Generic method to test proxies with a specific condition.
+        """
+        try:
+            with self._cursor() as cur:
+                if limit:
+                    cur.execute(f"SELECT id, ip, port, proxy_url, proxy_type FROM `{self.table}` WHERE {condition} LIMIT %s", (limit,))
+                else:
+                    cur.execute(f"SELECT id, ip, port, proxy_url, proxy_type FROM `{self.table}` WHERE {condition}")
+                rows = cur.fetchall()
+
+            if not rows:
+                print(f"No {category} proxies found in database")
+                return 0
+
+            print(f"Testing {len(rows)} {category} proxies against {self.test_target_url} with 20s timeout each...")
+            
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            def _test_proxy(r):
+                # Use the new single-proxy test method with realistic headers
+                # Pass proxy_type information for proper protocol detection
+                success, result = self.test_proxy(r["proxy_url"], timeout=20, proxy_type=r.get("proxy_type"), verbose=verbose)
+                
+                if success:
+                    # Extract IP from result message
+                    tested_ip = result.split("IP: ")[-1] if "IP: " in result else None
+                    print(f"✅ {r['ip']}:{r['port']} -> {tested_ip}")
+                    return (r["id"], 1, None, tested_ip, None)
+                else:
+                    print(f"❌ {r['ip']}:{r['port']} -> {result}")
+                    return (r["id"], 0, None, None, result)
+
+            updates = []
+            with ThreadPoolExecutor(max_workers=max_workers) as ex:
+                futs = [ex.submit(_test_proxy, r) for r in rows]
+                for f in as_completed(futs):
+                    updates.append(f.result())
+
+            with self._cursor() as cur:
+                for pid, ok, latency, tested_ip, err in updates:
+                    cur.execute(
+                        f"""
+                        UPDATE `{self.table}`
+                           SET working=%s,
+                               tested_timestamp=UTC_TIMESTAMP(),
+                               latency=%s,
+                               tested_ip=%s,
+                               error_message=%s,
+                               updated_at=UTC_TIMESTAMP()
+                         WHERE id=%s
+                        """,
+                        (ok, (None if latency is None else round(latency, 3)), tested_ip, err, pid),
+                    )
+            self._commit()
+            
+            # Print summary
+            working = sum(1 for _, ok, _, _, _ in updates if ok)
+            total = len(updates)
+            print(f"\n📊 Test Results: {working}/{total} {category} proxies working ({working/total*100:.1f}%)")
+            
+            return len(updates)
+        except KeyboardInterrupt:
+            print(f"\n⚠️ {category.capitalize()} proxy testing interrupted by user")
+            raise
+        except Exception as e:
+            print(f"❌ {category.capitalize()} proxy testing failed: {e}")
+            raise
+
+    def test_all_proxies(self, limit: int = None, verbose: bool = False, max_workers: int = 30):
+        """
+        Test all proxies in the database using the new test site with single long timeout.
+        This is useful for refreshing the working status of all proxies.
+        """
+        try:
+            with self._cursor() as cur:
+                if limit:
+                    cur.execute(f"SELECT id, ip, port, proxy_url, proxy_type FROM `{self.table}` LIMIT %s", (limit,))
+                else:
+                    cur.execute(f"SELECT id, ip, port, proxy_url, proxy_type FROM `{self.table}`")
+                rows = cur.fetchall()
+
+            if not rows:
+                print("No proxies found in database")
+                return 0
+
+            print(f"Testing {len(rows)} proxies against {self.test_target_url} with 20s timeout each...")
+            
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            def _test_proxy(r):
+                # Use the new single-proxy test method with realistic headers
+                # Pass proxy_type information for proper protocol detection
+                success, result = self.test_proxy(r["proxy_url"], timeout=20, proxy_type=r.get("proxy_type"), verbose=verbose)
+                
+                if success:
+                    # Extract IP from result message
+                    tested_ip = result.split("IP: ")[-1] if "IP: " in result else None
+                    print(f"✅ {r['ip']}:{r['port']} -> {tested_ip}")
+                    return (r["id"], 1, None, tested_ip, None)
+                else:
+                    print(f"❌ {r['ip']}:{r['port']} -> {result}")
+                    return (r["id"], 0, None, None, result)
+
+            updates = []
+            with ThreadPoolExecutor(max_workers=max_workers) as ex:
+                futs = [ex.submit(_test_proxy, r) for r in rows]
+                for f in as_completed(futs):
+                    updates.append(f.result())
+
+            with self._cursor() as cur:
+                for pid, ok, latency, tested_ip, err in updates:
+                    cur.execute(
+                        f"""
+                        UPDATE `{self.table}`
+                           SET working=%s,
+                               tested_timestamp=UTC_TIMESTAMP(),
+                               latency=%s,
+                               tested_ip=%s,
+                               error_message=%s,
+                               updated_at=UTC_TIMESTAMP()
+                         WHERE id=%s
+                        """,
+                        (ok, (None if latency is None else round(latency, 3)), tested_ip, err, pid),
+                    )
+            self._commit()
+            
+            # Print summary
+            working = sum(1 for _, ok, _, _, _ in updates if ok)
+            total = len(updates)
+            print(f"\n📊 Test Results: {working}/{total} proxies working ({working/total*100:.1f}%)")
+            
+            return len(updates)
+        except KeyboardInterrupt:
+            print("\n⚠️ Proxy testing interrupted by user")
+            raise
+        except Exception as e:
+            print(f"❌ Proxy testing failed: {e}")
+            raise
+
+    def test_proxy(self, proxy_str, timeout=20, proxy_type=None, verbose=False):
+        """Test a single proxy with realistic browser headers and single long timeout."""
+        try:
+            # Parse proxy string - handle both "ip:port" and "protocol://ip:port" formats
+            if '://' in proxy_str:
+                # URL format like "socks5://104.21.27.195:80"
+                protocol_part, rest = proxy_str.split('://', 1)
+                if ':' not in rest:
+                    return False, "Invalid proxy format"
+                host, port_str = rest.rsplit(':', 1)
+            else:
+                # Simple format like "104.21.27.195:80"
+                if ':' not in proxy_str:
+                    return False, "Invalid proxy format"
+                host, port_str = proxy_str.rsplit(':', 1)
+            
+            try:
+                port = int(port_str)
+            except ValueError:
+                return False, "Invalid port number"
+            
+            # Use urllib3 directly to avoid requests retry mechanism
+            import urllib3
+            from urllib3.contrib.socks import SOCKSProxyManager
+            
+            # Configure proxy based on proxy type with fallback strategy
+            protocols_to_try = []
+            
+            if '://' in proxy_str:
+                # Use protocol from URL as primary
+                protocols_to_try.append(protocol_part)
+            elif proxy_type:
+                # Use labeled proxy type as primary
+                protocol_map = {
+                    'socks5': 'socks5',
+                    'socks4': 'socks4', 
+                    'http': 'http',
+                    'https': 'https'
+                }
+                primary_protocol = protocol_map.get(proxy_type.upper(), 'socks5')
+                protocols_to_try.append(primary_protocol)
+            else:
+                # No known type, try all protocols
+                protocols_to_try = ['socks5', 'socks4', 'https', 'http']
+            
+            # If we have a known working proxy type, only try that one
+            if proxy_type and not verbose:
+                protocols_to_try = [protocols_to_try[0]]
+            elif verbose:
+                # In verbose mode, try fallback protocols
+                if len(protocols_to_try) == 1:
+                    # Add fallback protocols for verbose testing
+                    primary = protocols_to_try[0]
+                    if primary == 'socks5':
+                        protocols_to_try = ['socks5', 'socks4', 'https', 'http']
+                    elif primary == 'socks4':
+                        protocols_to_try = ['socks4', 'socks5', 'https', 'http']
+                    elif primary == 'https':
+                        protocols_to_try = ['https', 'http', 'socks5', 'socks4']
+                    elif primary == 'http':
+                        protocols_to_try = ['http', 'https', 'socks5', 'socks4']
+            
+            # Create headers
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Encoding': 'gzip, deflate',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+            }
+            
+            # Try each protocol until one works
+            for protocol in protocols_to_try:
+                if verbose and len(protocols_to_try) > 1:
+                    print(f"  Trying {protocol}...", end=" ")
+                
+                try:
+                    # Use urllib3 directly with no retries
+                    if protocol in ['socks5', 'socks4']:
+                        proxy_url = f'{protocol}://{host}:{port}'
+                        http = SOCKSProxyManager(proxy_url, timeout=urllib3.Timeout(connect=timeout, read=timeout))
+                    else:
+                        # For HTTP/HTTPS proxies, use regular HTTPConnectionPool
+                        proxy_url = f'{protocol}://{host}:{port}'
+                        http = urllib3.ProxyManager(proxy_url, timeout=urllib3.Timeout(connect=timeout, read=timeout))
+                    
+                    # Single request with no retries
+                    response = http.request('GET', 'http://ip.knws.co.uk', headers=headers, retries=False)
+                    
+                    if response.status == 200:
+                        # Verify we got a valid IP response
+                        content = response.data.decode('utf-8').strip()
+                        if content and len(content) < 50:  # Should be just an IP address
+                            if verbose and len(protocols_to_try) > 1:
+                                print(f"✅ {protocol} worked!")
+                            return True, f"Working - IP: {content} (via {protocol})"
+                        else:
+                            if verbose and len(protocols_to_try) > 1:
+                                print(f"❌ Invalid response")
+                            continue  # Try next protocol
+                    else:
+                        if verbose and len(protocols_to_try) > 1:
+                            print(f"❌ HTTP {response.status}")
+                        continue  # Try next protocol
+                        
+                except urllib3.exceptions.TimeoutError:
+                    if verbose and len(protocols_to_try) > 1:
+                        print(f"❌ Timeout")
+                    continue  # Try next protocol
+                except urllib3.exceptions.ConnectTimeoutError:
+                    if verbose and len(protocols_to_try) > 1:
+                        print(f"❌ Connect timeout")
+                    continue  # Try next protocol
+                except urllib3.exceptions.ReadTimeoutError:
+                    if verbose and len(protocols_to_try) > 1:
+                        print(f"❌ Read timeout")
+                    continue  # Try next protocol
+                except urllib3.exceptions.ProxyError as e:
+                    if verbose and len(protocols_to_try) > 1:
+                        print(f"❌ Proxy error")
+                    continue  # Try next protocol
+                except urllib3.exceptions.ConnectionError as e:
+                    if verbose and len(protocols_to_try) > 1:
+                        print(f"❌ Connection error")
+                    continue  # Try next protocol
+                except Exception as e:
+                    if verbose and len(protocols_to_try) > 1:
+                        print(f"❌ Error: {str(e)[:30]}...")
+                    continue  # Try next protocol
+            
+            # If we get here, all protocols failed
+            return False, f"All protocols failed: {', '.join(protocols_to_try)}"
+                
+        except Exception as e:
+            return False, f"Error: {str(e)}"
 
     # --------------------------- Acquire / Rotate / Latch ---------------------------
 
@@ -584,28 +923,40 @@ if __name__ == "__main__":  # pragma: no cover
     import argparse
 
     ap = argparse.ArgumentParser(description="Proxy helper smoke test")
-    ap.add_argument("--host", required=True)
-    ap.add_argument("--user", required=True)
-    ap.add_argument("--password", required=True)
-    ap.add_argument("--db", default="companies")
     ap.add_argument("--force-refresh", action="store_true")
+    ap.add_argument("--test-all", action="store_true", help="Test all proxies")
+    ap.add_argument("--test-working", action="store_true", help="Test only working proxies (working=1)")
+    ap.add_argument("--test-failed", action="store_true", help="Test only failed proxies (working=0)")
+    ap.add_argument("--test-untested", action="store_true", help="Test only untested proxies (tested_timestamp IS NULL)")
+    ap.add_argument("--verbose", "-v", action="store_true", help="Verbose output showing protocol fallback testing")
+    ap.add_argument("--threads", "-t", type=int, default=30, help="Number of concurrent threads for testing (default: 30)")
+    ap.add_argument("--limit", "-l", type=int, help="Limit number of proxies to test (default: all)")
+    ap.add_argument("--ip", type=str, help="Test a specific IP address (e.g., --ip '98.178.72.21')")
     args = ap.parse_args()
 
-    helper = Proxy_Helper(
-        db_user=args.user,
-        db_password=args.password,
-        db_name=args.db,
-        db_host=args.host,
-        force_proxy_refresh=args.force_refresh,
-    )
+    # Use config from .env file
+    from config import C
+    helper = Proxy_Helper.from_config(C, force_proxy_refresh=args.force_refresh)
 
     print("Stats:", helper.stats())
-    helper.rotate_proxy()
-    print("Latched proxy:", helper.get_current_proxy())
+    
+    if args.ip:
+        helper.test_specific_ip(args.ip, verbose=args.verbose)
+    elif args.test_working:
+        helper.test_working_proxies(limit=args.limit, verbose=args.verbose, max_workers=args.threads)
+    elif args.test_failed:
+        helper.test_failed_proxies(limit=args.limit, verbose=args.verbose, max_workers=args.threads)
+    elif args.test_untested:
+        helper.test_untested_proxies(limit=args.limit, verbose=args.verbose, max_workers=args.threads)
+    elif args.test_all:
+        helper.test_all_proxies(limit=args.limit, verbose=args.verbose, max_workers=args.threads)
+    else:
+        helper.rotate_proxy()
+        print("Latched proxy:", helper.get_current_proxy())
 
-    try:
-        with helper.session() as s:
-            r = s.get("https://api.ipify.org?format=json", timeout=20)
-            print("IP via proxy:", r.text)
-    finally:
-        helper.close()
+        try:
+            with helper.session() as s:
+                r = s.get("http://ip.knws.co.uk", timeout=20)
+                print("IP via proxy:", r.text)
+        finally:
+            helper.close()

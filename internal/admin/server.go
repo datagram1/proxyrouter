@@ -12,6 +12,7 @@ import (
 
 	"proxyrouter/internal/config"
 	"proxyrouter/internal/db"
+	"proxyrouter/internal/refresh"
 
 	"log/slog"
 
@@ -30,7 +31,7 @@ type Server struct {
 }
 
 // NewServer creates a new admin server
-func NewServer(cfg *config.Config, database *db.Database) *Server {
+func NewServer(cfg *config.Config, database *db.Database, refresher *refresh.Refresher) *Server {
 	// Auto-generate session secret if empty
 	sessionSecret := cfg.Admin.SessionSecret
 	if sessionSecret == "" {
@@ -52,7 +53,7 @@ func NewServer(cfg *config.Config, database *db.Database) *Server {
 	mw := NewMiddleware(authManager, authConfig)
 
 	// Create handlers
-	handlers := NewHandlers(cfg, database, authManager, mw)
+	handlers := NewHandlers(cfg, database, authManager, mw, refresher)
 
 	// Create server
 	s := &Server{
@@ -130,6 +131,10 @@ func (s *Server) setupRoutes() {
 
 			// CSRF token refresh
 			protected.Get("/csrf-refresh", s.handlers.RefreshCSRFToken)
+
+			// Refresh and health check
+			protected.Post("/refresh", s.handlers.RunRefresh)
+			protected.Post("/health-check", s.handlers.RunHealthCheck)
 
 			// Logout
 			protected.Post("/logout", s.handlers.DoLogout)

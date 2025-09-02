@@ -8,20 +8,20 @@ listen:
 
 # Timeout settings (in milliseconds)
 timeouts:
-  dial_ms: 3000
-  read_ms: 10000
-  write_ms: 10000
+  dial_ms: 10000
+  read_ms: 30000
+  write_ms: 30000
 
 # Tor configuration
 tor:
-  enabled: false
+  enabled: true
   socks_address: "tor:9050"
 
 # Refresh configuration
 refresh:
   enable_general_sources: true
   interval_sec: 900
-  healthcheck_concurrency: 50
+  healthcheck_concurrency: 20
   sources:
     - name: "spys.one"
       url: "https://spys.one/free-proxy-list/"
@@ -32,7 +32,7 @@ refresh:
 
 # Database configuration
 database:
-  path: "/var/lib/proxyr/router.db"
+  path: "data/router.db"
 
 # Logging configuration
 logging:

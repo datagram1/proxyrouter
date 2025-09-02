@@ -66,11 +66,11 @@ func (l *Logger) WithRoute(ctx context.Context, routeGroup string, precedence in
 }
 
 // WithProxy adds proxy information to the logger context
-func (l *Logger) WithProxy(ctx context.Context, proxyID int, scheme, host string, port int) *slog.Logger {
+func (l *Logger) WithProxy(ctx context.Context, proxyID int, proxyType, ip string, port int) *slog.Logger {
 	return l.logger.With(
 		"proxy_id", proxyID,
-		"proxy_scheme", scheme,
-		"proxy_host", host,
+		"proxy_type", proxyType,
+		"proxy_ip", ip,
 		"proxy_port", port,
 	)
 }
